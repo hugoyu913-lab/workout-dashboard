@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python *)",
+      "Bash(streamlit run *)",
+      "Bash(jobs)",
+      "Bash(python -m streamlit run app.py --server.headless true --server.port 8501)",
+      "Bash(echo \"PID: $!\")",
+      "Read(//tmp/**)",
+      "Bash(curl *)",
+      "Bash(pkill -f \"streamlit run\")",
+      "Bash(pkill -f \"python -m streamlit\")",
+      "Bash(find /mnt -name \"SKILL.md\")",
+      "Bash(find /home -name \"SKILL.md\")",
+      "Bash(ls /mnt)",
+      "Read(//c/Users/hugoy//**)",
+      "Read(//c/Users/hugoy/**)",
+      "Bash(netstat -ano)",
+      "Bash(pkill -f \"streamlit\")",
+      "Bash(netstat -tlnp)"
+    ]
+  }
+}
