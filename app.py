@@ -29,6 +29,7 @@ from src.metrics import (
     daily_workout_summary,
     estimated_1rm_by_exercise,
     estimated_1rm_over_time,
+    fatigue_risk_detector,
     muscle_group_frequency,
     muscle_group_volume,
     pr_tracker,
@@ -482,6 +483,19 @@ def render_strength_retention(df: pd.DataFrame) -> None:
     )
 
 
+def render_fatigue_risk(df: pd.DataFrame) -> None:
+    fatigue = fatigue_risk_detector(df)
+
+    section_header("Fatigue Risk Detector")
+    c1, c2 = st.columns([1, 3])
+    with c1:
+        st.metric("Fatigue Risk", fatigue["risk"])
+    with c2:
+        st.markdown("##### Reasons")
+        st.markdown(f"<ul>{_insight_list(fatigue['reasons'])}</ul>", unsafe_allow_html=True)
+        st.caption(f"Suggested action: {fatigue['suggested_action']}")
+
+
 def render_dashboard(df: pd.DataFrame) -> None:
     filtered = filter_frame(df)
 
@@ -502,6 +516,7 @@ def render_dashboard(df: pd.DataFrame) -> None:
 
     render_weekly_insights(filtered)
     render_strength_retention(filtered)
+    render_fatigue_risk(filtered)
 
     section_header("Muscle Group Frequency")
     mg_frequency = muscle_group_frequency(filtered)

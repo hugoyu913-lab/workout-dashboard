@@ -383,6 +383,98 @@ def strength_retention_score(df: pd.DataFrame, weeks: int = 3) -> dict[str, obje
     }
 
 
+def fatigue_risk_detector(df: pd.DataFrame, weeks: int = 3) -> dict[str, object]:
+    empty = {
+        "risk": "Low",
+        "reasons": ["No repeat-performance fatigue signals detected."],
+        "suggested_action": "Maintain current loads and recovery habits.",
+    }
+    if df.empty or "Date" not in df.columns or "Exercise" not in df.columns:
+        return empty
+
+    work = df.dropna(subset=["Date", "Exercise", "Weight", "Reps"]).copy()
+    if work.empty:
+        return empty
+
+    work["Date"] = pd.to_datetime(work["Date"], errors="coerce")
+    work = work.dropna(subset=["Date"])
+    if work.empty:
+        return empty
+
+    latest_date = work["Date"].max()
+    cutoff = latest_date - pd.Timedelta(weeks=weeks)
+    recent = work[work["Date"] >= cutoff].copy()
+    if recent.empty:
+        return empty
+
+    session_best = (
+        recent.groupby(["Date", "Exercise"], as_index=False)
+        .agg(
+            Weight=("Weight", "max"),
+            Reps=("Reps", "max"),
+            MuscleGroup=("MuscleGroup", "first") if "MuscleGroup" in recent.columns else ("Exercise", "first"),
+        )
+        .sort_values(["Exercise", "Date"])
+    )
+
+    same_weight_rep_drops: list[str] = []
+    regression_groups: dict[str, int] = {}
+    for exercise, group in session_best.groupby("Exercise"):
+        ordered = group.sort_values("Date").reset_index(drop=True)
+        if len(ordered) < 2:
+            continue
+        for idx in range(1, len(ordered)):
+            previous = ordered.iloc[idx - 1]
+            current = ordered.iloc[idx]
+            if (
+                pd.notna(previous["Weight"])
+                and pd.notna(current["Weight"])
+                and pd.notna(previous["Reps"])
+                and pd.notna(current["Reps"])
+                and abs(float(current["Weight"]) - float(previous["Weight"])) < 0.01
+                and float(current["Reps"]) < float(previous["Reps"])
+            ):
+                same_weight_rep_drops.append(
+                    f"{exercise}: reps dropped from {previous['Reps']:.0f} to {current['Reps']:.0f} at {current['Weight']:.0f} lbs."
+                )
+                muscle_group = str(current.get("MuscleGroup", "unknown")).strip().lower() or "unknown"
+                regression_groups[muscle_group] = regression_groups.get(muscle_group, 0) + 1
+
+    reasons: list[str] = []
+    if same_weight_rep_drops:
+        reasons.extend(same_weight_rep_drops[:3])
+
+    clustered_groups = [
+        group for group, count in sorted(regression_groups.items())
+        if count >= 2 and group not in {"unknown", "other"}
+    ]
+    for group in clustered_groups:
+        reasons.append(f"{group.title()} has {regression_groups[group]} same-load rep regressions in the recent window.")
+
+    weekly_sessions = workout_frequency(recent)
+    high_frequency_weeks = weekly_sessions[weekly_sessions["Workouts"] > 6] if not weekly_sessions.empty else pd.DataFrame()
+    if not high_frequency_weeks.empty:
+        max_sessions = int(high_frequency_weeks["Workouts"].max())
+        reasons.append(f"Weekly training frequency reached {max_sessions} sessions, above the normal 5-6 target.")
+
+    risk_points = len(same_weight_rep_drops) + len(clustered_groups) * 2 + len(high_frequency_weeks)
+    if risk_points >= 4:
+        risk = "High"
+        suggested_action = "Reduce fatigue: add recovery, increase RIR by 1-2, or trim intensity for regressing muscle groups."
+    elif risk_points >= 2:
+        risk = "Moderate"
+        suggested_action = "Monitor recovery and avoid pushing load on exercises with same-weight rep drops."
+    else:
+        risk = "Low"
+        suggested_action = "Maintain current recovery habits and keep loads stable."
+
+    return {
+        "risk": risk,
+        "reasons": reasons or empty["reasons"],
+        "suggested_action": suggested_action,
+    }
+
+
 def daily_workout_metrics(df: pd.DataFrame) -> pd.DataFrame:
     """One row per calendar day: total volume, best e1RM, set count."""
     work = df.dropna(subset=["Date"]).copy()
