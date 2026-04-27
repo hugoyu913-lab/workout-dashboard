@@ -24,7 +24,9 @@ from src.charts import (
 from src.cleaner import clean_workout_log
 from src.insights import build_weekly_insights
 from src.metrics import (
+    daily_workout_detail,
     daily_workout_metrics,
+    daily_workout_summary,
     estimated_1rm_by_exercise,
     estimated_1rm_over_time,
     muscle_group_frequency,
@@ -424,6 +426,38 @@ def render_weekly_insights(df: pd.DataFrame) -> None:
         st.markdown(f"<ul>{_insight_list(recommendations)}</ul>", unsafe_allow_html=True)
 
 
+def render_daily_workout_detail(df: pd.DataFrame, filtered: pd.DataFrame) -> None:
+    available_dates = sorted(df["Date"].dropna().dt.date.unique().tolist())
+    if not available_dates:
+        return
+
+    filtered_dates = filtered["Date"].dropna().dt.date
+    default_date = filtered_dates.max() if not filtered_dates.empty else available_dates[-1]
+    default_index = available_dates.index(default_date) if default_date in available_dates else len(available_dates) - 1
+
+    section_header("Daily Workout Detail")
+    selected_date = st.selectbox(
+        "Workout date",
+        available_dates,
+        index=default_index,
+        format_func=lambda value: value.strftime("%Y-%m-%d"),
+        key="daily_workout_date",
+    )
+
+    detail = daily_workout_detail(filtered, selected_date)
+    if detail.empty:
+        detail = daily_workout_detail(df, selected_date)
+
+    summary = daily_workout_summary(detail)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Exercises", f"{summary['total_exercises']:,}")
+    c2.metric("Working Sets", f"{summary['total_working_sets']:,}")
+    c3.metric("Volume", metric_value(float(summary["total_volume"])))
+    c4.metric("Muscle Groups", str(summary["muscle_groups_trained"]))
+
+    st.dataframe(detail, use_container_width=True, hide_index=True)
+
+
 def render_dashboard(df: pd.DataFrame) -> None:
     filtered = filter_frame(df)
 
@@ -507,6 +541,8 @@ def render_dashboard(df: pd.DataFrame) -> None:
             c3.metric("PRs set", pr_count)
 
         st.plotly_chart(scatter_1rm_timeline(time_df, selected_ex), use_container_width=True)
+
+    render_daily_workout_detail(df, filtered)
 
     section_header("Data Tables")
     tab1, tab2, tab3 = st.tabs(["Volume by Exercise", "PR Tracker", "Raw Data"])

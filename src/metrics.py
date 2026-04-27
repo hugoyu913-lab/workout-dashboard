@@ -153,6 +153,61 @@ def weekly_category_volume(df: pd.DataFrame) -> pd.DataFrame:
     return work.groupby(["Week", "Category"], as_index=False)["Volume"].sum()
 
 
+def daily_workout_detail(df: pd.DataFrame, selected_date: object) -> pd.DataFrame:
+    columns = ["Exercise", "Set", "Weight", "Reps", "Volume", "MuscleGroup", "Category", "SourceSheet"]
+    if df.empty or "Date" not in df.columns:
+        return pd.DataFrame(columns=columns)
+
+    target_date = pd.to_datetime(selected_date, errors="coerce")
+    if pd.isna(target_date):
+        return pd.DataFrame(columns=columns)
+
+    dated = df.copy()
+    dated["Date"] = pd.to_datetime(dated["Date"], errors="coerce")
+    work = dated[dated["Date"].dt.date == target_date.date()].copy()
+    if work.empty:
+        return pd.DataFrame(columns=columns)
+
+    order_candidates = ["WorkoutOrder", "ExerciseOrder", "Order", "RowOrder"]
+    order_columns = [column for column in order_candidates if column in work.columns]
+    sort_columns = order_columns or [column for column in ["SourceSheet", "Exercise", "Set"] if column in work.columns]
+    if sort_columns:
+        work = work.sort_values(sort_columns, na_position="last")
+
+    for column in columns:
+        if column not in work.columns:
+            work[column] = pd.NA
+    return work[columns].reset_index(drop=True)
+
+
+def daily_workout_summary(detail: pd.DataFrame) -> dict[str, object]:
+    if detail.empty:
+        return {
+            "total_exercises": 0,
+            "total_working_sets": 0,
+            "total_volume": 0.0,
+            "muscle_groups_trained": "None",
+        }
+
+    muscle_groups = (
+        detail["MuscleGroup"]
+        .dropna()
+        .astype(str)
+        .str.strip()
+    )
+    muscle_groups = sorted(
+        group for group in muscle_groups.unique()
+        if group and group.lower() not in {"unknown", "other"}
+    )
+
+    return {
+        "total_exercises": int(detail["Exercise"].dropna().nunique()),
+        "total_working_sets": int(detail["Set"].notna().sum()),
+        "total_volume": float(detail["Volume"].sum(skipna=True)),
+        "muscle_groups_trained": ", ".join(muscle_groups) if muscle_groups else "None",
+    }
+
+
 def daily_workout_metrics(df: pd.DataFrame) -> pd.DataFrame:
     """One row per calendar day: total volume, best e1RM, set count."""
     work = df.dropna(subset=["Date"]).copy()
