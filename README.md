@@ -4,7 +4,7 @@ Streamlit dashboard backed by a Google Sheets workout log. Reads every worksheet
 
 The optional `Checkins` Google Sheet tab adds bodyweight trend (7-day rolling average), cut-pace classification, recovery signal tracking, and feeds the Cut Guardrails composite risk banner.
 
-The first page is **Coach**, a daily cutting-phase action plan. It combines Apple Health HRV/resting HR, optional Checkins recovery data, weekly muscle frequency, anchor-lift strength retention, and cut pace into a deterministic readiness score, muscle checklist, workout focus, exercise targets, weekly progress tracker, and warning/action cards.
+The first page is **Coach**, a daily cutting-phase action plan. It combines Apple Health HRV/resting HR, optional Checkins recovery data, steps, nutrition, weekly muscle frequency, anchor-lift strength retention, and cut pace into a deterministic readiness score, daily target checklist, workout focus, exercise targets, weekly progress tracker, and warning/action cards.
 
 ---
 
@@ -96,13 +96,22 @@ The app resolves credentials in this priority:
 Add a Google Sheet tab named exactly **`Checkins`** with these columns:
 
 ```
-Date | Bodyweight | Waist | Calories | Protein | SleepHours | Energy | Soreness | Stress | Deload
+Date | Bodyweight | Waist | Calories | Protein | Carbs | Fat | Steps | SleepHours | Energy | Soreness | Stress | Deload | Notes
 ```
 
-- All numeric except `Date` (any parseable format) and `Deload` (`TRUE`/`FALSE`).
+- Numeric: `Bodyweight`, `Waist`, `Calories`, `Protein`, `Carbs`, `Fat`, `Steps`, `SleepHours`, `Energy`, `Soreness`, `Stress`.
+- `Date` can be any parseable date, `Deload` accepts `TRUE`/`FALSE`, and `Notes` is preserved as text.
 - `Deload = TRUE` suppresses fatigue and regression warnings for that entire week.
 
 If the tab is absent, the dashboard shows placeholder cards and continues normally. The Coach page also continues by falling back to Apple Health HRV/resting heart rate when those CSVs are available, then prompts you to add Checkins for the full readiness score.
+
+To create or update the tab headers without overwriting existing rows:
+
+```bash
+python scripts/setup_checkins.py
+```
+
+The Coach page uses daily targets from `config/profile.py`: 10,000 steps, 2,200 calories, 180g protein, 180g carbs, 60g fat, and 8h sleep. The Bodyweight & Recovery section also charts 30-day steps, sleep, and macro adherence from Checkins.
 
 ---
 

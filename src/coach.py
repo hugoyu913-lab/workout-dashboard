@@ -10,6 +10,13 @@ import streamlit as st
 
 from config.profile import (
     ANCHOR_LIFTS,
+    DAILY_CALORIES_TARGET,
+    DAILY_CARBS_TARGET,
+    DAILY_FAT_TARGET,
+    DAILY_PROTEIN_TARGET,
+    DAILY_SLEEP_MINIMUM,
+    DAILY_SLEEP_TARGET,
+    DAILY_STEPS_GOAL,
     MAX_MUSCLE_FREQ_PER_WEEK,
     TARGET_REPS_MAX,
     TARGET_REPS_MIN,
@@ -100,6 +107,16 @@ def _latest_checkin(checkins: pd.DataFrame | None) -> pd.Series | None:
     return data.iloc[-1]
 
 
+def _today_checkin(checkins: pd.DataFrame | None) -> pd.Series | None:
+    data = _prep_checkins(checkins)
+    if data.empty:
+        return None
+    today_rows = data[data["Date"].dt.date == _today()]
+    if today_rows.empty:
+        return None
+    return today_rows.iloc[-1]
+
+
 def _days_ago(day: date | None) -> int | None:
     if day is None:
         return None
@@ -176,6 +193,20 @@ def compute_readiness(checkins: pd.DataFrame | None, health_data: Any = None) ->
 
     last = _latest_checkin(checkins)
     if last is not None:
+        steps = pd.to_numeric(last.get("Steps"), errors="coerce")
+        if pd.notna(steps):
+            steps = float(steps)
+            if steps > 10000:
+                delta = 10
+            elif steps >= 7500:
+                delta = 5
+            elif steps >= 5000:
+                delta = 0
+            else:
+                delta = -10
+            score += delta
+            breakdown.append({"label": "Steps", "delta": delta, "note": f"{steps:,.0f} today"})
+
         sleep = pd.to_numeric(last.get("SleepHours"), errors="coerce")
         if pd.notna(sleep):
             sleep = float(sleep)
@@ -455,6 +486,12 @@ def weekly_progress_tracker(df: pd.DataFrame | None, checkins: pd.DataFrame | No
     cut_pace_value = None if pd.isna(cut_pace) else float(cut_pace)
 
     recovery_avg = None
+    avg_steps = None
+    avg_protein = None
+    avg_sleep = None
+    avg_calories = None
+    all_targets_days = 0
+    perfect_streak = 0
     c = _prep_checkins(checkins)
     if not c.empty:
         week_c = c[(c["Date"].dt.date >= week_start) & (c["Date"].dt.date <= today)]
@@ -467,6 +504,45 @@ def weekly_progress_tracker(df: pd.DataFrame | None, checkins: pd.DataFrame | No
         if values:
             recovery_avg = round(sum(values) / len(values), 1)
 
+        if not week_c.empty:
+            if "Steps" in week_c.columns:
+                val = pd.to_numeric(week_c["Steps"], errors="coerce").dropna().mean()
+                avg_steps = None if pd.isna(val) else round(float(val))
+            if "Protein" in week_c.columns:
+                val = pd.to_numeric(week_c["Protein"], errors="coerce").dropna().mean()
+                avg_protein = None if pd.isna(val) else round(float(val), 1)
+            if "SleepHours" in week_c.columns:
+                val = pd.to_numeric(week_c["SleepHours"], errors="coerce").dropna().mean()
+                avg_sleep = None if pd.isna(val) else round(float(val), 1)
+            if "Calories" in week_c.columns:
+                val = pd.to_numeric(week_c["Calories"], errors="coerce").dropna().mean()
+                avg_calories = None if pd.isna(val) else round(float(val))
+
+            target_cols = ["Steps", "Calories", "Protein", "SleepHours"]
+            if all(col in week_c.columns for col in target_cols):
+                complete = week_c.dropna(subset=target_cols).copy()
+                if not complete.empty:
+                    hit = (
+                        (complete["Steps"] >= DAILY_STEPS_GOAL)
+                        & (complete["Calories"].between(DAILY_CALORIES_TARGET * 0.9, DAILY_CALORIES_TARGET * 1.1))
+                        & (complete["Protein"] >= DAILY_PROTEIN_TARGET)
+                        & (complete["SleepHours"] >= DAILY_SLEEP_MINIMUM)
+                    )
+                    all_targets_days = int(hit.sum())
+
+            if all(col in c.columns for col in target_cols):
+                complete_all = c.dropna(subset=target_cols).sort_values("Date", ascending=False)
+                for row in complete_all.itertuples(index=False):
+                    if (
+                        float(getattr(row, "Steps")) >= DAILY_STEPS_GOAL
+                        and DAILY_CALORIES_TARGET * 0.9 <= float(getattr(row, "Calories")) <= DAILY_CALORIES_TARGET * 1.1
+                        and float(getattr(row, "Protein")) >= DAILY_PROTEIN_TARGET
+                        and float(getattr(row, "SleepHours")) >= DAILY_SLEEP_MINIMUM
+                    ):
+                        perfect_streak += 1
+                    else:
+                        break
+
     return {
         "this_sessions": session_count(week_start, today),
         "last_sessions": session_count(prev_start, prev_end),
@@ -474,6 +550,12 @@ def weekly_progress_tracker(df: pd.DataFrame | None, checkins: pd.DataFrame | No
         "strength_pct": strength_pct,
         "cut_pace": cut_pace_value,
         "recovery_avg": recovery_avg,
+        "avg_steps": avg_steps,
+        "avg_protein": avg_protein,
+        "avg_sleep": avg_sleep,
+        "avg_calories": avg_calories,
+        "all_targets_days": all_targets_days,
+        "perfect_streak": perfect_streak,
     }
 
 
@@ -490,7 +572,7 @@ def weekly_warnings(df: pd.DataFrame | None, checkins: pd.DataFrame | None) -> l
             daily = rows.groupby(rows["Date"].dt.date)["Estimated1RM"].max().sort_index()
             if len(daily) >= 3 and daily.iloc[-1] < daily.iloc[-2] * 0.98 and daily.iloc[-2] < daily.iloc[-3] * 0.98:
                 warnings.append({
-                    "icon": "ANCHOR",
+                    "icon": "⚓",
                     "title": f"{exercise} regressed twice",
                     "explanation": "Estimated 1RM dropped across the last two exposures.",
                     "action": "Consider deload or form check.",
@@ -502,7 +584,7 @@ def weekly_warnings(df: pd.DataFrame | None, checkins: pd.DataFrame | None) -> l
             days = _days_ago(last_date)
             if days is not None and days >= 5:
                 warnings.append({
-                    "icon": "GAP",
+                    "icon": "🎯",
                     "title": f"{muscle.title()} frequency gap",
                     "explanation": f"{muscle.title()} has not been trained in {days} days.",
                     "action": f"Priority: train {muscle} today.",
@@ -511,7 +593,7 @@ def weekly_warnings(df: pd.DataFrame | None, checkins: pd.DataFrame | None) -> l
         grades = grade_sessions_history(work, limit=3)
         if not grades.empty and len(grades) >= 3 and all(g in {"D", "F"} for g in grades["Grade"].head(3)):
             warnings.append({
-                "icon": "DF",
+                "icon": "🔴",
                 "title": "Three low-grade sessions",
                 "explanation": "The last three graded sessions were D/F.",
                 "action": "Recovery week recommended.",
@@ -519,6 +601,46 @@ def weekly_warnings(df: pd.DataFrame | None, checkins: pd.DataFrame | None) -> l
 
     c = _prep_checkins(checkins)
     if not c.empty:
+        if "Steps" in c.columns:
+            steps = pd.to_numeric(c["Steps"], errors="coerce").dropna()
+            if len(steps) >= 3 and steps.tail(3).lt(5000).all():
+                warnings.append({
+                    "icon": "👟",
+                    "title": "Low activity outside gym",
+                    "explanation": "Steps have been below 5k for 3 straight days.",
+                    "action": "Add 20 min walks.",
+                })
+
+        if "SleepHours" in c.columns:
+            sleep_recent = pd.to_numeric(c["SleepHours"], errors="coerce").dropna()
+            if len(sleep_recent) >= 2 and sleep_recent.tail(2).lt(DAILY_SLEEP_MINIMUM).all():
+                warnings.append({
+                    "icon": "🌙",
+                    "title": "Sleep debt accumulating",
+                    "explanation": f"Sleep has been below {DAILY_SLEEP_MINIMUM:.1f}h for 2 nights.",
+                    "action": "Prioritize sleep tonight.",
+                })
+
+        if "Protein" in c.columns:
+            protein = pd.to_numeric(c["Protein"], errors="coerce").dropna()
+            if len(protein) >= 3 and protein.tail(3).lt(DAILY_PROTEIN_TARGET).all():
+                warnings.append({
+                    "icon": "🥤",
+                    "title": "Protein consistently low",
+                    "explanation": "Protein has been below target for 3 straight days.",
+                    "action": "Add a shake post-workout.",
+                })
+
+        if "Calories" in c.columns:
+            calories = pd.to_numeric(c["Calories"], errors="coerce").dropna()
+            if len(calories) >= 3 and calories.tail(3).lt(DAILY_CALORIES_TARGET * 0.7).all():
+                warnings.append({
+                    "icon": "🍽️",
+                    "title": "Deficit too deep",
+                    "explanation": "Calories have been under 70% of target for 3 straight days.",
+                    "action": "You're risking muscle loss - increase food intake.",
+                })
+
         metrics = checkin_metrics(c)
         pace = metrics.get("weekly_weight_loss_rate")
         current_weight = metrics.get("bodyweight_7day_avg")
@@ -526,14 +648,14 @@ def weekly_warnings(df: pd.DataFrame | None, checkins: pd.DataFrame | None) -> l
             pct = float(pace) / float(current_weight) * 100
             if pct > 1:
                 warnings.append({
-                    "icon": "PACE",
+                    "icon": "⚡",
                     "title": "Cut pace too aggressive",
                     "explanation": f"Bodyweight is dropping about {pct:.1f}% per week.",
                     "action": "Increase calories by 200 - too aggressive.",
                 })
             elif pct < 0.3:
                 warnings.append({
-                    "icon": "PACE",
+                    "icon": "📉",
                     "title": "Cut pace stalled",
                     "explanation": f"Bodyweight is dropping about {pct:.1f}% per week.",
                     "action": "Reduce calories by 150 - cut stalled.",
@@ -545,7 +667,7 @@ def weekly_warnings(df: pd.DataFrame | None, checkins: pd.DataFrame | None) -> l
             sleep = pd.to_numeric(week_c["SleepHours"], errors="coerce").dropna()
             if not sleep.empty and float(sleep.mean()) < 6.5:
                 warnings.append({
-                    "icon": "SLEEP",
+                    "icon": "🌙",
                     "title": "Sleep is limiting recovery",
                     "explanation": f"Sleep is averaging {float(sleep.mean()):.1f}h this week.",
                     "action": "Sleep is limiting your recovery.",
@@ -571,6 +693,75 @@ def _small_line(label: str, value: object, color: str = "#c8c8cc") -> str:
         "font-size:0.68rem;color:#777782;margin-top:0.35rem;\">"
         f"<span>{escape(label)}</span><span style=\"color:{color};\">{escape(str(value))}</span></div>"
     )
+
+
+def _target_status(current: float | None, target: float) -> tuple[float, str, str]:
+    if current is None or pd.isna(current):
+        return 0.0, "#555560", "No data"
+    pct = float(current) / target if target > 0 else 0.0
+    if pct >= 0.9:
+        return min(pct, 1.0), "#22c55e", "OK"
+    if pct >= 0.7:
+        return pct, "#f59e0b", "WARN"
+    return max(pct, 0.02), "#ef4444", "LOW"
+
+
+def _fmt_target_value(value: float | None, unit: str = "") -> str:
+    if value is None or pd.isna(value):
+        return "No data"
+    if unit == "h":
+        return f"{float(value):g}h"
+    if unit == "g":
+        return f"{float(value):g}g"
+    return f"{float(value):,.0f}"
+
+
+def _render_today_targets(checkins: pd.DataFrame | None, spreadsheet_id: str | None = None) -> None:
+    st.markdown("### TODAY'S TARGETS")
+    row = _today_checkin(checkins)
+    if row is None:
+        sheet_link = ""
+        if spreadsheet_id:
+            url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit"
+            sheet_link = f"<div style='margin-top:0.5rem;'><a href='{url}' target='_blank' style='color:#e8890c;'>Open Checkins sheet</a></div>"
+        st.markdown(
+            _card(
+                "Daily Lifestyle Targets",
+                "<div style='font-size:0.75rem;color:#c8c8cc;'>Log today's checkins to see targets.</div>" + sheet_link,
+                "#555560",
+            ),
+            unsafe_allow_html=True,
+        )
+        return
+
+    targets = [
+        ("STEPS", "Steps", DAILY_STEPS_GOAL, ""),
+        ("CALORIES", "Calories", DAILY_CALORIES_TARGET, ""),
+        ("PROTEIN", "Protein", DAILY_PROTEIN_TARGET, "g"),
+        ("CARBS", "Carbs", DAILY_CARBS_TARGET, "g"),
+        ("FAT", "Fat", DAILY_FAT_TARGET, "g"),
+        ("SLEEP", "SleepHours", DAILY_SLEEP_TARGET, "h"),
+    ]
+    for label, column, target, unit in targets:
+        current_raw = pd.to_numeric(row.get(column), errors="coerce")
+        current = None if pd.isna(current_raw) else float(current_raw)
+        fill, color, status = _target_status(current, float(target))
+        pct = 0 if current is None else round(current / float(target) * 100)
+        icon = "✅" if status == "OK" else ("⚠️" if status == "WARN" else "❌")
+        value = f"{_fmt_target_value(current, unit)} / {_fmt_target_value(float(target), unit)}"
+        st.markdown(
+            f"""
+            <div style="display:grid;grid-template-columns:110px 1fr 70px 48px;gap:0.75rem;
+                        align-items:center;font-size:0.72rem;color:#c8c8cc;margin:0.35rem 0;">
+              <div style="letter-spacing:0.12em;color:#777782;">{label}</div>
+              <div>{escape(value)}</div>
+              <div style="color:{color};text-align:right;">{pct}%</div>
+              <div style="color:{color};text-align:right;">{icon}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.progress(fill)
 
 
 def _render_readiness(readiness: dict[str, object]) -> None:
@@ -688,6 +879,22 @@ def _render_progress(progress: dict[str, object]) -> None:
         col.markdown(_card(label, _small_line(value_label, status, color), color), unsafe_allow_html=True)
         col.progress(fill)
 
+    st.markdown("#### Lifestyle")
+    lifestyle_rows = [
+        ("Avg daily steps", "No checkin data" if progress["avg_steps"] is None else f"{progress['avg_steps']:,.0f} / {DAILY_STEPS_GOAL:,}", None if progress["avg_steps"] is None else float(progress["avg_steps"]), DAILY_STEPS_GOAL * 0.9, DAILY_STEPS_GOAL * 0.7),
+        ("Avg protein", "No checkin data" if progress["avg_protein"] is None else f"{progress['avg_protein']:.0f}g / {DAILY_PROTEIN_TARGET}g", None if progress["avg_protein"] is None else float(progress["avg_protein"]), DAILY_PROTEIN_TARGET * 0.9, DAILY_PROTEIN_TARGET * 0.7),
+        ("Avg sleep", "No checkin data" if progress["avg_sleep"] is None else f"{progress['avg_sleep']:.1f}h / {DAILY_SLEEP_TARGET:g}h", None if progress["avg_sleep"] is None else float(progress["avg_sleep"]), DAILY_SLEEP_TARGET * 0.9, DAILY_SLEEP_MINIMUM),
+        ("Avg calories", "No checkin data" if progress["avg_calories"] is None else f"{progress['avg_calories']:,.0f} / {DAILY_CALORIES_TARGET:,}", None if progress["avg_calories"] is None else 100 - abs(float(progress["avg_calories"]) - DAILY_CALORIES_TARGET) / DAILY_CALORIES_TARGET * 100, 90, 70),
+        ("All-target days", f"{progress['all_targets_days']} this week", float(progress["all_targets_days"]), 4, 2),
+        ("Perfect streak", f"{progress['perfect_streak']} days", float(progress["perfect_streak"]), 3, 1),
+    ]
+    for start in range(0, len(lifestyle_rows), 3):
+        cols = st.columns(3)
+        for col, (label, value_label, value, green_at, amber_at) in zip(cols, lifestyle_rows[start:start + 3]):
+            fill, color, status = _progress_status(value, green_at, amber_at)
+            col.markdown(_card(label, _small_line(value_label, status, color), color), unsafe_allow_html=True)
+            col.progress(fill)
+
 
 def _render_warnings(warnings: list[dict[str, str]]) -> None:
     st.markdown("### WEEKLY WARNINGS & ACTIONS")
@@ -704,7 +911,12 @@ def _render_warnings(warnings: list[dict[str, str]]) -> None:
             col.markdown(_card(f"{warning['icon']} - {warning['title']}", body, "#ef4444"), unsafe_allow_html=True)
 
 
-def render_coach_page(df: pd.DataFrame, checkins: pd.DataFrame | None = None, health_data: Any = None) -> None:
+def render_coach_page(
+    df: pd.DataFrame,
+    checkins: pd.DataFrame | None = None,
+    health_data: Any = None,
+    spreadsheet_id: str | None = None,
+) -> None:
     readiness = compute_readiness(checkins, health_data)
     checklist = weekly_muscle_checklist(df)
     plan = generate_game_plan(df, int(readiness["score"]), checklist)
@@ -712,6 +924,8 @@ def render_coach_page(df: pd.DataFrame, checkins: pd.DataFrame | None = None, he
     warnings = weekly_warnings(df, checkins)
 
     _render_readiness(readiness)
+    st.divider()
+    _render_today_targets(checkins, spreadsheet_id)
     st.divider()
     _render_checklist(checklist)
     st.divider()

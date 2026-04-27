@@ -5,6 +5,14 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
+from config.profile import (
+    DAILY_CARBS_TARGET,
+    DAILY_FAT_TARGET,
+    DAILY_PROTEIN_TARGET,
+    DAILY_SLEEP_TARGET,
+    DAILY_STEPS_GOAL,
+)
+
 _ACCENT = "#e8890c"
 _ACCENT2 = "#f0c040"
 _FONT = "IBM Plex Mono, monospace"
@@ -139,6 +147,100 @@ def line_bodyweight_trend(df: pd.DataFrame) -> go.Figure:
         hovertemplate="%{x|%Y-%m-%d}<br>7-day avg: %{y:.1f} lbs<extra></extra>",
     ))
     fig.update_layout(yaxis_title="Bodyweight (lbs)", xaxis_title="")
+    return _apply_theme(fig)
+
+
+def bar_checkin_steps(df: pd.DataFrame, days: int = 30) -> go.Figure:
+    if df.empty or "Date" not in df.columns or "Steps" not in df.columns:
+        return empty_figure("No steps check-in data")
+    work = df.dropna(subset=["Date", "Steps"]).copy()
+    if work.empty:
+        return empty_figure("No steps check-in data")
+    work = work.sort_values("Date").tail(days)
+    fig = go.Figure(go.Bar(
+        x=work["Date"],
+        y=work["Steps"],
+        marker=dict(color="#4ade80", line=dict(width=0)),
+        hovertemplate="%{x|%Y-%m-%d}<br>Steps: %{y:,.0f}<extra></extra>",
+        name="Steps",
+    ))
+    fig.add_hline(
+        y=DAILY_STEPS_GOAL,
+        line=dict(color=_ACCENT, width=1.5, dash="dot"),
+        annotation_text=f"{DAILY_STEPS_GOAL:,}",
+        annotation_font=dict(color=_ACCENT, size=10, family=_FONT),
+    )
+    fig.update_layout(yaxis_title="Steps", xaxis_title="")
+    return _apply_theme(fig)
+
+
+def bar_checkin_sleep(df: pd.DataFrame, days: int = 30) -> go.Figure:
+    if df.empty or "Date" not in df.columns or "SleepHours" not in df.columns:
+        return empty_figure("No sleep check-in data")
+    work = df.dropna(subset=["Date", "SleepHours"]).copy()
+    if work.empty:
+        return empty_figure("No sleep check-in data")
+    work = work.sort_values("Date").tail(days)
+    fig = go.Figure(go.Bar(
+        x=work["Date"],
+        y=work["SleepHours"],
+        marker=dict(color="#60a5fa", line=dict(width=0)),
+        hovertemplate="%{x|%Y-%m-%d}<br>Sleep: %{y:.1f}h<extra></extra>",
+        name="Sleep",
+    ))
+    fig.add_hline(
+        y=DAILY_SLEEP_TARGET,
+        line=dict(color=_ACCENT, width=1.5, dash="dot"),
+        annotation_text=f"{DAILY_SLEEP_TARGET:g}h",
+        annotation_font=dict(color=_ACCENT, size=10, family=_FONT),
+    )
+    fig.update_layout(yaxis_title="Sleep (hours)", xaxis_title="")
+    return _apply_theme(fig)
+
+
+def bar_checkin_macros(df: pd.DataFrame, days: int = 30) -> go.Figure:
+    required = {"Date", "Protein", "Carbs", "Fat"}
+    if df.empty or not required.issubset(df.columns):
+        return empty_figure("No macro check-in data")
+    work = df.dropna(subset=["Date"]).copy()
+    if work.empty:
+        return empty_figure("No macro check-in data")
+    work = work.sort_values("Date").tail(days)
+    long = work.melt(
+        id_vars=["Date"],
+        value_vars=["Protein", "Carbs", "Fat"],
+        var_name="Macro",
+        value_name="Grams",
+    ).dropna(subset=["Grams"])
+    if long.empty:
+        return empty_figure("No macro check-in data")
+    targets = {
+        "Protein": DAILY_PROTEIN_TARGET,
+        "Carbs": DAILY_CARBS_TARGET,
+        "Fat": DAILY_FAT_TARGET,
+    }
+    long["Target"] = long["Macro"].map(targets)
+    long["Adherence"] = long["Grams"] / long["Target"] * 100
+    fig = px.bar(
+        long,
+        x="Date",
+        y="Adherence",
+        color="Macro",
+        barmode="group",
+        color_discrete_map={
+            "Protein": "#4ade80",
+            "Carbs": "#60a5fa",
+            "Fat": "#f59e0b",
+        },
+        hover_data={"Grams": ":.0f", "Target": ":.0f", "Adherence": ":.0f"},
+    )
+    fig.add_hline(
+        y=100,
+        line=dict(color=_ACCENT, width=1.5, dash="dot"),
+        annotation_text="target",
+        annotation_font=dict(color=_ACCENT, size=10, family=_FONT),
+    )
+    fig.update_layout(yaxis_title="Macro target adherence (%)", xaxis_title="")
     return _apply_theme(fig)
 
 

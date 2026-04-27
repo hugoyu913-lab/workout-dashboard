@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import pandas as pd
 
-from config.profile import TARGET_REPS_MIN, TARGET_REPS_MAX, TARGET_SETS
+from config.profile import (
+    DAILY_CALORIES_TARGET,
+    DAILY_PROTEIN_TARGET,
+    DAILY_SLEEP_MINIMUM,
+    TARGET_REPS_MIN,
+    TARGET_REPS_MAX,
+    TARGET_SETS,
+)
 
 # Re-export from dedicated modules so existing callers keep working
 from src.fatigue import fatigue_risk_detector  # noqa: F401
@@ -15,11 +22,15 @@ CHECKIN_COLUMNS = [
     "Waist",
     "Calories",
     "Protein",
+    "Carbs",
+    "Fat",
+    "Steps",
     "SleepHours",
     "Energy",
     "Soreness",
     "Stress",
     "Deload",
+    "Notes",
 ]
 
 
@@ -42,7 +53,19 @@ def clean_checkins(raw: pd.DataFrame) -> pd.DataFrame:
     df = df[CHECKIN_COLUMNS].copy()
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
 
-    numeric_cols = [c for c in CHECKIN_COLUMNS if c not in ("Date", "Deload")]
+    numeric_cols = [
+        "Bodyweight",
+        "Waist",
+        "Calories",
+        "Protein",
+        "Carbs",
+        "Fat",
+        "Steps",
+        "SleepHours",
+        "Energy",
+        "Soreness",
+        "Stress",
+    ]
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
@@ -54,6 +77,8 @@ def clean_checkins(raw: pd.DataFrame) -> pd.DataFrame:
         .str.lower()
         .isin({"true", "1", "yes"})
     )
+
+    df["Notes"] = df["Notes"].fillna("").astype(str)
 
     df = df.dropna(subset=["Date"]).sort_values("Date").reset_index(drop=True)
     return df
@@ -113,10 +138,21 @@ def checkin_metrics(checkins: pd.DataFrame) -> dict[str, object]:
     warnings: list[str] = []
     if cut_pace == "aggressive":
         warnings.append("Bodyweight is dropping quickly; monitor strength retention and recovery.")
-    if pd.notna(average_sleep) and float(average_sleep) < 6.5:
-        warnings.append("Average sleep is below 6.5 hours.")
-    if pd.notna(average_protein) and float(average_protein) < 120:
+    if pd.notna(average_sleep) and float(average_sleep) < DAILY_SLEEP_MINIMUM:
+        warnings.append(f"Average sleep is below {DAILY_SLEEP_MINIMUM:.1f} hours.")
+    if pd.notna(average_protein) and float(average_protein) < DAILY_PROTEIN_TARGET * 0.8:
         warnings.append("Average protein appears low for muscle retention.")
+
+    if "Protein" in df.columns:
+        low_protein = df["Protein"].tail(3).lt(DAILY_PROTEIN_TARGET * 0.8).all()
+        if len(df["Protein"].dropna()) >= 3 and low_protein:
+            warnings.append("Low protein - muscle loss risk on this cut.")
+    if "Calories" in df.columns:
+        latest_calories = df["Calories"].dropna().iloc[-1] if not df["Calories"].dropna().empty else pd.NA
+        if pd.notna(latest_calories) and float(latest_calories) < DAILY_CALORIES_TARGET * 0.7:
+            warnings.append("Too aggressive deficit - increase food intake.")
+        if pd.notna(latest_calories) and float(latest_calories) > DAILY_CALORIES_TARGET * 1.1:
+            warnings.append("Surplus detected - check against cut goal.")
 
     recovery_parts: list[str] = []
     if pd.notna(average_sleep):

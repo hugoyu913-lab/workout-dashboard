@@ -4,6 +4,7 @@ from typing import Collection
 
 import pandas as pd
 
+from config.profile import DAILY_CALORIES_TARGET, DAILY_PROTEIN_TARGET
 from src.retention import strength_retention_score
 
 
@@ -84,6 +85,22 @@ def compute_guardrails(
         recovery_raw += 15
         recovery_flags.append(f"avg stress {avg_stress:.1f}/10 (>7)")
 
+    nutrition_flags: list[str] = []
+    if not checkins.empty:
+        df_c = checkins.sort_values("Date").copy() if "Date" in checkins.columns else checkins.copy()
+        if "Protein" in df_c.columns:
+            protein = pd.to_numeric(df_c["Protein"], errors="coerce").dropna()
+            if len(protein) >= 3 and protein.tail(3).lt(DAILY_PROTEIN_TARGET * 0.8).all():
+                nutrition_flags.append("Low protein - muscle loss risk on this cut")
+        if "Calories" in df_c.columns:
+            calories = pd.to_numeric(df_c["Calories"], errors="coerce").dropna()
+            if not calories.empty:
+                latest_calories = float(calories.iloc[-1])
+                if latest_calories < DAILY_CALORIES_TARGET * 0.7:
+                    nutrition_flags.append("Too aggressive deficit - increase food intake")
+                if latest_calories > DAILY_CALORIES_TARGET * 1.1:
+                    nutrition_flags.append("Surplus detected - check against cut goal")
+
     composite = max(0.0, retention_component + pace_risk + recovery_raw)
     composite_rounded = round(composite)
 
@@ -115,5 +132,6 @@ def compute_guardrails(
         "action": action,
         "retention_score": retention_score,
         "cut_pace": cut_pace,
-        "recovery_flags": recovery_flags,
+        "recovery_flags": recovery_flags + nutrition_flags,
+        "nutrition_flags": nutrition_flags,
     }

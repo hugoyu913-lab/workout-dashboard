@@ -13,6 +13,9 @@ from src.charts import (
     bar_muscle_group_frequency,
     bar_muscle_group_volume,
     bar_top_exercises,
+    bar_checkin_macros,
+    bar_checkin_sleep,
+    bar_checkin_steps,
     correlation_heatmap,
     dual_axis_line,
     heatmap_weekly_muscle_volume,
@@ -682,8 +685,8 @@ def render_bodyweight_recovery(checkins: pd.DataFrame, workout_df: pd.DataFrame)
             checkins_placeholder(
                 "Bodyweight Trend",
                 "Add a Google Sheet tab named 'Checkins' with columns: "
-                "Date, Bodyweight, Waist, Calories, Protein, SleepHours, "
-                "Energy, Soreness, Stress, Deload",
+                "Date, Bodyweight, Waist, Calories, Protein, Carbs, Fat, Steps, "
+                "SleepHours, Energy, Soreness, Stress, Deload, Notes",
             )
         with c2:
             checkins_placeholder(
@@ -728,6 +731,13 @@ def render_bodyweight_recovery(checkins: pd.DataFrame, workout_df: pd.DataFrame)
                 st.warning(" ".join(warnings))
             else:
                 st.success("No recovery warnings from check-ins.")
+
+        chart_a, chart_b = st.columns(2)
+        with chart_a:
+            st.plotly_chart(bar_checkin_steps(checkins), use_container_width=True)
+        with chart_b:
+            st.plotly_chart(bar_checkin_sleep(checkins), use_container_width=True)
+        st.plotly_chart(bar_checkin_macros(checkins), use_container_width=True)
     except Exception as exc:
         st.warning(f"Could not render bodyweight/recovery section: {exc}")
 
@@ -1146,7 +1156,7 @@ def main() -> None:
         st.stop()
 
     if page == "Coach":
-        render_coach_page(df, checkins, health_df)
+        render_coach_page(df, checkins, health_df, spreadsheet_id)
     elif page == "Dashboard":
         render_dashboard(df, checkins)
     elif page == "Grades":

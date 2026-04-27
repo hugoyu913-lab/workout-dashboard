@@ -8,6 +8,14 @@ TRAINING_DAYS_PER_WEEK: int = 6
 PHASE: str = "cut"  # cut | bulk | maintain
 MAX_MUSCLE_FREQ_PER_WEEK: int = 4
 
+DAILY_STEPS_GOAL: int = 10000
+DAILY_CALORIES_TARGET: int = 2200
+DAILY_PROTEIN_TARGET: int = 180
+DAILY_CARBS_TARGET: int = 180
+DAILY_FAT_TARGET: int = 60
+DAILY_SLEEP_TARGET: float = 8
+DAILY_SLEEP_MINIMUM: float = 6.5
+
 # Key compound lifts used for strength-retention tracking and game plan flagging
 ANCHOR_LIFTS: frozenset[str] = frozenset({
     "bench press", "incline bench press", "decline bench press",

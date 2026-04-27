@@ -30,6 +30,7 @@ workout-dashboard/
       vo2max.csv
   scripts/
     parse_health.py
+    setup_checkins.py
   src/
     __init__.py
     apple_health.py
@@ -129,7 +130,7 @@ data/health/
 ## Current Working Features
 
 - Google Sheets client with Streamlit secrets support and local service-account JSON fallback.
-- Coach page is the first navigation item. It provides a deterministic daily cutting checklist with readiness scoring, muscle-group frequency cards, a recommended Push/Pull/Legs/Arms/Recovery focus, 2-set exercise targets, weekly progress bars, and warning/action cards.
+- Coach page is the first navigation item. It provides a deterministic daily cutting checklist with readiness scoring, today's lifestyle targets, muscle-group frequency cards, a recommended Push/Pull/Legs/Arms/Recovery focus, 2-set exercise targets, weekly progress bars, and warning/action cards.
 - Workbook-wide worksheet loading through `gspread`.
 - Parsing of the current block-header sheet format where each session starts with a row like `Workout Date | Weight | Reps`.
 - Bare `m/d` date handling with inferred year rollovers.
@@ -151,7 +152,9 @@ Date, Workout, Exercise, MuscleGroup, Category, Set, Weight, Reps, Volume, Sourc
 - Fatigue Risk Detector that flags same-weight rep drops, repeated regressions in the same muscle group, and weeks above the normal 5-6 training sessions, then returns `Low`, `Moderate`, or `High` risk with reasons and a suggested action.
 - Suggested Exercises module backed by `config/exercise_recommendations.csv`; it recommends 2-3 high-priority movements per affected muscle group for frequency gaps, regressions, and recovery-sensitive substitutions.
 - Next Workout Recommendation module that combines weekly insights, fatigue risk, strength retention, frequency gaps, and suggested exercises to choose a deterministic Push, Pull, Legs, Upper, or Recovery session.
-- Optional `Checkins` Google Sheet tab support for bodyweight and recovery tracking with 7-day bodyweight average, weekly weight-loss rate, average protein, average sleep, cut pace classification, trend chart, Coach readiness inputs, and recovery warnings.
+- Optional `Checkins` Google Sheet tab support for bodyweight, waist, calories, protein, carbs, fat, steps, sleep, energy, soreness, stress, deload flags, and notes. Checkins feeds 7-day bodyweight average, weekly weight-loss rate, nutrition guardrails, Coach readiness inputs, daily targets, lifestyle summaries, and recovery warnings.
+- `scripts/setup_checkins.py` creates the `Checkins` worksheet if missing and appends any missing required headers without overwriting existing daily rows.
+- Bodyweight & Recovery includes 30-day Checkins charts for steps vs 10k goal, sleep vs 8h target, and macro adherence for protein/carbs/fat.
 - Muscle group frequency section that counts unique workout dates per muscle group in the active sidebar-filtered date range and displays both a table and bar chart.
 - Daily workout detail section with a workout date selector, daily summary metrics, and an exact per-set table for `Exercise`, `Set`, `Weight`, `Reps`, `Volume`, `MuscleGroup`, `Category`, and `SourceSheet`.
 - Workout comparison section that compares each selected-day exercise against its most recent previous occurrence and flags `Improved`, `Same`, or `Regressed`.
