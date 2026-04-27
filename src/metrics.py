@@ -497,3 +497,397 @@ def daily_workout_metrics(df: pd.DataFrame) -> pd.DataFrame:
     )
     agg.rename(columns={"Date": "date"}, inplace=True)
     return agg.sort_values("date").reset_index(drop=True)
+
+
+# ── Session grading ────────────────────────────────────────────────────────
+
+
+def _score_to_grade(score: float) -> str:
+    if score >= 92:
+        return "A+"
+    if score >= 85:
+        return "A"
+    if score >= 78:
+        return "B+"
+    if score >= 70:
+        return "B"
+    if score >= 55:
+        return "C"
+    if score >= 40:
+        return "D"
+    return "F"
+
+
+def _grade_color(grade: str) -> str:
+    if grade in ("A+", "A"):
+        return "#e8890c"
+    if grade in ("B+", "B"):
+        return "#4ade80"
+    if grade == "C":
+        return "#f59e0b"
+    return "#ef4444"
+
+
+def _grade_coaching_comment(grade: str) -> str:
+    if grade in ("A+", "A"):
+        return "Excellent session — strength holding strong on this cut."
+    if grade in ("B+", "B"):
+        return "Solid work — minor improvements available."
+    if grade == "C":
+        return "Maintenance mode — watch for fatigue accumulation."
+    return "Recovery session needed — consider deload."
+
+
+def grade_session(df: pd.DataFrame, session_date=None) -> dict[str, object]:
+    """Grade a single training session (0-100) across four components.
+
+    Components (weights):
+      Strength performance    40% — exercises improved or maintained vs previous
+      Rep range adherence     25% — sets within TARGET_REPS range
+      Volume vs average       20% — session volume relative to personal average
+      Consistency             15% — set count relative to personal average
+    """
+    empty: dict[str, object] = {
+        "date": None,
+        "grade": "N/A",
+        "score": 0.0,
+        "strength_score": 0.0,
+        "rep_adherence_score": 0.0,
+        "volume_score": 0.0,
+        "consistency_score": 0.0,
+        "coaching_comment": "No session data.",
+        "best_lift": None,
+        "worst_lift": None,
+        "muscle_groups": [],
+        "total_volume": 0.0,
+        "total_exercises": 0,
+        "total_sets": 0,
+        "session_found": False,
+        "exercise_results": {},
+    }
+    if df.empty or "Date" not in df.columns or "Exercise" not in df.columns:
+        return empty
+
+    work = df.dropna(subset=["Date", "Exercise"]).copy()
+    work["Date"] = pd.to_datetime(work["Date"], errors="coerce")
+    work = work.dropna(subset=["Date"])
+    if work.empty:
+        return empty
+
+    work["Estimated1RM"] = work["Weight"] * (1 + work["Reps"] / 30)
+
+    if session_date is None:
+        session_date = work["Date"].max().date()
+    else:
+        session_date = pd.Timestamp(session_date).date()
+
+    session = work[work["Date"].dt.date == session_date]
+    if session.empty:
+        return empty
+
+    # Pre-build per-exercise history index (one pass, fast lookups)
+    history = work[work["Date"].dt.date < session_date]
+    hist_by_ex: dict[str, pd.DataFrame] = {}
+    for ex, grp in history.groupby("Exercise"):
+        hist_by_ex[str(ex)] = grp
+
+    # ── Component 1: Strength (40%) ──────────────────────────────────────
+    improved_or_maintained = 0
+    total_comparable = 0
+    exercise_results: dict[str, dict] = {}
+
+    for exercise in session["Exercise"].unique():
+        ex_str = str(exercise)
+        curr = session[session["Exercise"] == exercise]
+        curr_e1rm = curr["Estimated1RM"].max()
+        curr_vol = float(curr["Volume"].sum())
+
+        prev_grp = hist_by_ex.get(ex_str)
+        if prev_grp is None or prev_grp.empty:
+            exercise_results[ex_str] = {
+                "status": "new", "ratio": None,
+                "curr_e1rm": curr_e1rm, "prev_e1rm": None, "volume": curr_vol,
+            }
+            continue
+
+        prev_e1rm = prev_grp["Estimated1RM"].max()
+        if pd.isna(curr_e1rm) or pd.isna(prev_e1rm) or prev_e1rm <= 0:
+            exercise_results[ex_str] = {
+                "status": "no_data", "ratio": None,
+                "curr_e1rm": curr_e1rm, "prev_e1rm": prev_e1rm, "volume": curr_vol,
+            }
+            continue
+
+        ratio = float(curr_e1rm) / float(prev_e1rm)
+        total_comparable += 1
+        if ratio >= 0.98:
+            improved_or_maintained += 1
+            status = "improved" if ratio > 1.005 else "maintained"
+        else:
+            status = "regressed"
+
+        exercise_results[ex_str] = {
+            "status": status, "ratio": ratio,
+            "curr_e1rm": curr_e1rm, "prev_e1rm": prev_e1rm, "volume": curr_vol,
+        }
+
+    strength_score = (improved_or_maintained / total_comparable * 100) if total_comparable > 0 else 50.0
+
+    # ── Component 2: Rep range adherence (25%) ───────────────────────────
+    reps = session["Reps"].dropna()
+    if not reps.empty:
+        in_range = ((reps >= TARGET_REPS_MIN) & (reps <= TARGET_REPS_MAX)).sum()
+        rep_score = float(in_range) / len(reps) * 100
+    else:
+        rep_score = 50.0
+
+    # ── Component 3: Volume vs average for this muscle-group combo (20%) ─
+    today_volume = float(session["Volume"].sum())
+    today_mgs = (
+        set(session["MuscleGroup"].dropna().astype(str).str.lower().unique())
+        if "MuscleGroup" in session.columns else set()
+    )
+    if today_mgs and not history.empty and "MuscleGroup" in history.columns:
+        def _has_overlap(g: pd.DataFrame) -> bool:
+            return bool(
+                today_mgs & set(g["MuscleGroup"].dropna().astype(str).str.lower().unique())
+            )
+        hist_vols = (
+            history.groupby(history["Date"].dt.date)
+            .apply(lambda g: float(g["Volume"].sum()) if _has_overlap(g) else None)
+            .dropna()
+        )
+        avg_vol = float(hist_vols.mean()) if not hist_vols.empty else today_volume
+    elif not history.empty:
+        avg_vol = float(history.groupby(history["Date"].dt.date)["Volume"].sum().mean())
+    else:
+        avg_vol = today_volume
+    volume_score = min(today_volume / avg_vol * 100, 100.0) if avg_vol > 0 else 50.0
+
+    # ── Component 4: Consistency — set count vs personal average (15%) ───
+    today_sets = int(session["Set"].notna().sum())
+    if not history.empty:
+        avg_sets = float(history.groupby(history["Date"].dt.date)["Set"].count().mean())
+    else:
+        avg_sets = float(today_sets)
+    consistency_score = min(today_sets / avg_sets * 100, 100.0) if avg_sets > 0 else 50.0
+
+    # ── Composite ────────────────────────────────────────────────────────
+    composite = (
+        strength_score * 0.40
+        + rep_score * 0.25
+        + volume_score * 0.20
+        + consistency_score * 0.15
+    )
+    grade = _score_to_grade(composite)
+
+    # ── Best / worst lift ────────────────────────────────────────────────
+    valid_e1rms = {
+        ex: d["curr_e1rm"]
+        for ex, d in exercise_results.items()
+        if d["curr_e1rm"] is not None and not pd.isna(d["curr_e1rm"])
+    }
+    best_lift: dict | None = None
+    worst_lift: dict | None = None
+    if valid_e1rms:
+        best_ex = max(valid_e1rms, key=valid_e1rms.get)
+        best_lift = {"exercise": best_ex, "e1rm": round(float(valid_e1rms[best_ex]), 1)}
+
+    regressed = {
+        ex: d["ratio"]
+        for ex, d in exercise_results.items()
+        if d["status"] == "regressed" and d["ratio"] is not None
+    }
+    if regressed:
+        worst_ex = min(regressed, key=regressed.get)
+        worst_lift = {
+            "exercise": worst_ex,
+            "delta_pct": round((float(regressed[worst_ex]) - 1) * 100, 1),
+        }
+
+    muscle_groups = sorted(today_mgs - {"unknown", "other", ""})
+
+    return {
+        "date": session_date,
+        "grade": grade,
+        "score": round(composite, 1),
+        "strength_score": round(strength_score, 1),
+        "rep_adherence_score": round(rep_score, 1),
+        "volume_score": round(volume_score, 1),
+        "consistency_score": round(consistency_score, 1),
+        "coaching_comment": _grade_coaching_comment(grade),
+        "best_lift": best_lift,
+        "worst_lift": worst_lift,
+        "muscle_groups": muscle_groups,
+        "total_volume": today_volume,
+        "total_exercises": len(exercise_results),
+        "total_sets": today_sets,
+        "session_found": True,
+        "exercise_results": exercise_results,
+    }
+
+
+def grade_sessions_history(df: pd.DataFrame, limit: int = 30) -> pd.DataFrame:
+    """Return a DataFrame with a grade row for each of the last `limit` sessions."""
+    if df.empty or "Date" not in df.columns:
+        return pd.DataFrame()
+
+    work = df.dropna(subset=["Date"]).copy()
+    work["Date"] = pd.to_datetime(work["Date"], errors="coerce")
+    work = work.dropna(subset=["Date"])
+    session_dates = sorted(work["Date"].dt.date.unique(), reverse=True)[:limit]
+
+    records: list[dict] = []
+    for d in session_dates:
+        g = grade_session(df, d)
+        if not g["session_found"]:
+            continue
+        records.append({
+            "Date": pd.Timestamp(d),
+            "Grade": g["grade"],
+            "Score": g["score"],
+            "Muscle Groups": ", ".join(g["muscle_groups"]) if g["muscle_groups"] else "—",
+            "Volume (lbs)": round(g["total_volume"]),
+            "Sets": g["total_sets"],
+            "_grade_group": (
+                "A+/A" if g["grade"] in ("A+", "A")
+                else "B+/B" if g["grade"] in ("B+", "B")
+                else g["grade"]  # C, D, F
+            ),
+        })
+
+    return pd.DataFrame(records)
+
+
+def _weekly_coaching_summary(
+    grade: str,
+    vol_change_pct: float | None,
+    retention_score: int,
+    covered_2x: list[str],
+) -> str:
+    parts: list[str] = []
+    if grade in ("A+", "A"):
+        parts.append("Excellent training week — performance held up well across sessions.")
+    elif grade in ("B+", "B"):
+        parts.append("Solid week. Sessions were productive with room for minor refinement.")
+    elif grade == "C":
+        parts.append("Mixed week — loads were sustainable but no clear progression signal.")
+    else:
+        parts.append("Difficult week. Prioritise recovery and sleep before the next block.")
+
+    if vol_change_pct is not None:
+        if vol_change_pct > 12:
+            parts.append(f"Volume jumped {vol_change_pct:.0f}% vs last week — monitor fatigue closely.")
+        elif vol_change_pct < -15:
+            parts.append(f"Volume dropped {abs(vol_change_pct):.0f}% vs last week.")
+        else:
+            direction = "up" if vol_change_pct >= 0 else "down"
+            parts.append(f"Volume {direction} {abs(vol_change_pct):.0f}% vs last week — within normal range.")
+
+    if retention_score >= 80:
+        parts.append("Strength retention looks solid.")
+    elif retention_score < 60 and retention_score > 0:
+        parts.append("Strength retention needs attention — check fatigue levels.")
+
+    return " ".join(parts)
+
+
+def weekly_grade(
+    df: pd.DataFrame,
+    checkins: pd.DataFrame | None = None,
+    num_weeks: int = 4,
+) -> list[dict[str, object]]:
+    """Grade the last `num_weeks` training weeks."""
+    if df.empty or "Date" not in df.columns:
+        return []
+
+    work = df.dropna(subset=["Date", "Exercise"]).copy()
+    work["Date"] = pd.to_datetime(work["Date"], errors="coerce")
+    work = work.dropna(subset=["Date"])
+    work["Week"] = work["Date"].dt.to_period("W")
+    if work.empty:
+        return []
+
+    recent_weeks = sorted(work["Week"].unique(), reverse=True)[:num_weeks]
+    results: list[dict[str, object]] = []
+
+    for i, week in enumerate(recent_weeks):
+        week_start = week.start_time.date()
+        week_end = week.end_time.date()
+        week_session_dates = work[work["Week"] == week]["Date"].dt.date.unique()
+        if len(week_session_dates) == 0:
+            continue
+
+        # Grade each session this week
+        valid_grades = [
+            g for d in week_session_dates
+            if (g := grade_session(df, d))["session_found"]
+        ]
+        if not valid_grades:
+            continue
+
+        avg_score = sum(g["score"] for g in valid_grades) / len(valid_grades)
+        wk_grade = _score_to_grade(avg_score)
+        week_vol = float(work[work["Week"] == week]["Volume"].sum())
+
+        # Volume change vs previous week
+        vol_change_pct: float | None = None
+        if i + 1 < len(recent_weeks):
+            prev_week = recent_weeks[i + 1]
+            prev_vol = float(work[work["Week"] == prev_week]["Volume"].sum())
+            if prev_vol > 0:
+                vol_change_pct = (week_vol - prev_vol) / prev_vol * 100
+
+        # Retention for recent window (uses full df, not week-scoped)
+        retention = strength_retention_score(df, weeks=2)
+
+        # Muscle groups with 2+ sessions this week
+        week_data = work[work["Week"] == week]
+        covered_2x: list[str] = []
+        if "MuscleGroup" in week_data.columns:
+            mg_days = week_data.groupby("MuscleGroup")["Date"].nunique()
+            covered_2x = [
+                str(mg) for mg, d in mg_days.items()
+                if d >= 2 and str(mg).lower() not in {"unknown", "other"}
+            ]
+
+        # Recovery from checkins this week
+        recovery_score: int | None = None
+        if checkins is not None and not checkins.empty and "Date" in checkins.columns:
+            c = checkins.copy()
+            c["Date"] = pd.to_datetime(c["Date"], errors="coerce")
+            wk_c = c[
+                (c["Date"].dt.date >= week_start)
+                & (c["Date"].dt.date <= week_end)
+            ]
+            if not wk_c.empty:
+                scores: list[float] = []
+                for col in ("Energy", "Soreness", "Stress"):
+                    if col in wk_c.columns:
+                        val = wk_c[col].dropna().mean()
+                        if pd.notna(val):
+                            # Energy: higher=better; Soreness/Stress: lower=better
+                            scores.append(10 - float(val) if col != "Energy" else float(val))
+                if scores:
+                    recovery_score = round(sum(scores) / len(scores) * 10)
+
+        coaching = _weekly_coaching_summary(
+            wk_grade, vol_change_pct, retention["score"], covered_2x
+        )
+
+        results.append({
+            "week": str(week),
+            "week_start": week_start,
+            "week_end": week_end,
+            "grade": wk_grade,
+            "score": round(avg_score, 1),
+            "sessions": len(valid_grades),
+            "volume": round(week_vol),
+            "volume_change_pct": round(vol_change_pct, 1) if vol_change_pct is not None else None,
+            "retention_score": retention["score"],
+            "recovery_score": recovery_score,
+            "covered_2x": covered_2x,
+            "coaching_summary": coaching,
+        })
+
+    return results

@@ -523,6 +523,37 @@ def line_session_quality(df: pd.DataFrame) -> go.Figure:
     return _apply_theme(fig)
 
 
+def bar_grade_distribution(history_df: pd.DataFrame) -> go.Figure:
+    """Horizontal bar showing session count per grade bucket."""
+    if history_df.empty or "Grade" not in history_df.columns:
+        return empty_figure("No grade history yet")
+    grade_order = ["A+", "A", "B+", "B", "C", "D", "F"]
+    grade_color_map = {
+        "A+": "#e8890c", "A": "#e8890c",
+        "B+": "#4ade80", "B": "#4ade80",
+        "C": "#f59e0b", "D": "#ef4444", "F": "#ef4444",
+    }
+    counts = history_df["Grade"].value_counts()
+    grades = [g for g in grade_order if g in counts.index]
+    if not grades:
+        return empty_figure("No grade history yet")
+    values = [int(counts[g]) for g in grades]
+    colors = [grade_color_map.get(g, "#888890") for g in grades]
+    fig = go.Figure(go.Bar(
+        x=values,
+        y=grades,
+        orientation="h",
+        marker=dict(color=colors, line=dict(width=0)),
+        hovertemplate="<b>%{y}</b>: %{x} session(s)<extra></extra>",
+    ))
+    fig.update_layout(
+        yaxis={"categoryorder": "array", "categoryarray": list(reversed(grades))},
+        xaxis_title="Sessions",
+        xaxis=dict(dtick=1),
+    )
+    return _apply_theme(fig)
+
+
 def correlation_heatmap(corr_matrix: pd.DataFrame, title: str = "Correlation Matrix") -> go.Figure:
     """Styled heatmap of a correlation matrix."""
     if corr_matrix.empty:
