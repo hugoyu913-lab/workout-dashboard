@@ -32,6 +32,7 @@ from src.metrics import (
     muscle_group_frequency,
     muscle_group_volume,
     pr_tracker,
+    strength_retention_score,
     top_exercises_by_volume,
     volume_by_exercise,
     weekly_muscle_group_volume,
@@ -466,6 +467,21 @@ def render_daily_workout_detail(df: pd.DataFrame, filtered: pd.DataFrame) -> Non
         st.dataframe(comparison, use_container_width=True, hide_index=True)
 
 
+def render_strength_retention(df: pd.DataFrame) -> None:
+    retention = strength_retention_score(df)
+
+    section_header("Strength Retention Score")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Score", f"{retention['score']:.0f}/100")
+    c2.metric("Improved", f"{retention['improved_pct']:.0f}%")
+    c3.metric("Maintained", f"{retention['maintained_pct']:.0f}%")
+    c4.metric("Regressed", f"{retention['regressed_pct']:.0f}%")
+    st.caption(
+        f"{retention['interpretation']} "
+        f"Based on {retention['exercise_count']} exercises with repeat data in the last 2-3 weeks."
+    )
+
+
 def render_dashboard(df: pd.DataFrame) -> None:
     filtered = filter_frame(df)
 
@@ -485,6 +501,7 @@ def render_dashboard(df: pd.DataFrame) -> None:
         return
 
     render_weekly_insights(filtered)
+    render_strength_retention(filtered)
 
     section_header("Muscle Group Frequency")
     mg_frequency = muscle_group_frequency(filtered)

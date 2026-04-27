@@ -298,6 +298,91 @@ def workout_comparison(df: pd.DataFrame, selected_date: object) -> pd.DataFrame:
     return pd.DataFrame(records, columns=columns)
 
 
+def strength_retention_score(df: pd.DataFrame, weeks: int = 3) -> dict[str, object]:
+    empty = {
+        "score": 0,
+        "improved_pct": 0.0,
+        "maintained_pct": 0.0,
+        "regressed_pct": 0.0,
+        "interpretation": "Not enough recent strength data to score retention.",
+        "exercise_count": 0,
+    }
+    if df.empty or "Date" not in df.columns or "Exercise" not in df.columns:
+        return empty
+
+    work = df.dropna(subset=["Date", "Exercise", "Weight", "Reps"]).copy()
+    if work.empty:
+        return empty
+
+    work["Date"] = pd.to_datetime(work["Date"], errors="coerce")
+    work = work.dropna(subset=["Date"])
+    if work.empty:
+        return empty
+
+    latest_date = work["Date"].max()
+    cutoff = latest_date - pd.Timedelta(weeks=weeks)
+    recent = work[work["Date"] >= cutoff].copy()
+    if recent.empty:
+        return empty
+
+    recent["Estimated1RM"] = recent["Weight"] * (1 + recent["Reps"] / 30)
+    statuses = []
+    for exercise, group in recent.groupby("Exercise"):
+        ordered = group.sort_values("Date")
+        dates = ordered["Date"].dt.date.unique()
+        if len(dates) < 2:
+            continue
+
+        latest_ex_date = ordered["Date"].max().date()
+        current = ordered[ordered["Date"].dt.date == latest_ex_date]
+        previous = ordered[ordered["Date"].dt.date < latest_ex_date]
+        if previous.empty:
+            continue
+
+        current_best = current["Estimated1RM"].max()
+        previous_best = previous["Estimated1RM"].max()
+        if pd.isna(current_best) or pd.isna(previous_best) or previous_best <= 0:
+            continue
+
+        ratio = current_best / previous_best
+        if ratio > 1.005:
+            statuses.append("Improved")
+        elif ratio < 0.98:
+            statuses.append("Regressed")
+        else:
+            statuses.append("Maintained")
+
+    total = len(statuses)
+    if total == 0:
+        return empty
+
+    improved = statuses.count("Improved")
+    maintained = statuses.count("Maintained")
+    regressed = statuses.count("Regressed")
+    improved_pct = improved / total * 100
+    maintained_pct = maintained / total * 100
+    regressed_pct = regressed / total * 100
+    score = round((improved * 1.0 + maintained * 0.7) / total * 100)
+
+    if score >= 85:
+        interpretation = "Strength retention is excellent for a cut."
+    elif score >= 70:
+        interpretation = "Strength is mostly maintained; monitor any regressions."
+    elif score >= 50:
+        interpretation = "Strength retention is mixed; recovery or effort may need adjustment."
+    else:
+        interpretation = "Strength retention is poor; reduce fatigue and prioritize key lifts."
+
+    return {
+        "score": score,
+        "improved_pct": improved_pct,
+        "maintained_pct": maintained_pct,
+        "regressed_pct": regressed_pct,
+        "interpretation": interpretation,
+        "exercise_count": total,
+    }
+
+
 def daily_workout_metrics(df: pd.DataFrame) -> pd.DataFrame:
     """One row per calendar day: total volume, best e1RM, set count."""
     work = df.dropna(subset=["Date"]).copy()

@@ -144,6 +144,7 @@ Date, Workout, Exercise, MuscleGroup, Category, Set, Weight, Reps, Volume, Sourc
 - KPI cards for total volume, workouts, logged sets, and exercise count.
 - Charts for weekly volume, workout frequency, top exercises, estimated 1RM, muscle group volume, weekly muscle group heatmap, and PR timeline.
 - Rule-based weekly insight panel tuned for high-intensity cutting: progression scores, progressing/stalled/declining exercise flags, muscle-group frequency gaps, fatigue/regression warnings, weekly training score, push/pull/legs balance, and suggested focus for the next week. This is local deterministic logic, not an API call.
+- Strength Retention Score section that classifies recent repeated exercises as `Improved`, `Maintained`, or `Regressed` across the last 2-3 weeks and normalizes the result to a 0-100 score.
 - Muscle group frequency section that counts unique workout dates per muscle group in the active sidebar-filtered date range and displays both a table and bar chart.
 - Daily workout detail section with a workout date selector, daily summary metrics, and an exact per-set table for `Exercise`, `Set`, `Weight`, `Reps`, `Volume`, `MuscleGroup`, `Category`, and `SourceSheet`.
 - Workout comparison section that compares each selected-day exercise against its most recent previous occurrence and flags `Improved`, `Same`, or `Regressed`.
