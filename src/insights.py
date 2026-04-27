@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 
 
+EXERCISE_RECOMMENDATIONS_PATH = Path("config/exercise_recommendations.csv")
 MIN_SESSIONS_FOR_STATUS = 3
 TARGET_MIN_MUSCLE_FREQUENCY = 2
 PROGRESSING_SCORE = 62
 DECLINING_SCORE = 40
+_PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
+_STABLE_CATEGORY_TERMS = ("machine", "supported", "cable", "pulldown", "row", "press")
 
 
 def _empty_insights() -> dict[str, object]:
@@ -26,6 +31,7 @@ def _empty_insights() -> dict[str, object]:
             "summary": "No push/pull/legs balance signal yet.",
         },
         "recommendations": ["Log more complete workout data before changing next week's focus."],
+        "suggested_exercises": ["No exercise suggestions available yet."],
         "suggested_focus": "Log more complete workout data before changing next week's focus.",
     }
 
@@ -80,6 +86,37 @@ def _weekly_exercise_stats(df: pd.DataFrame) -> pd.DataFrame:
         )
         .sort_values(["Week", "Exercise"])
     )
+
+
+def _load_exercise_recommendations(path: Path = EXERCISE_RECOMMENDATIONS_PATH) -> pd.DataFrame:
+    columns = ["muscle_group", "category", "exercise", "priority"]
+    if not path.exists():
+        return pd.DataFrame(columns=columns)
+
+    try:
+        recs = pd.read_csv(path, dtype=str).fillna("")
+    except Exception:
+        return pd.DataFrame(columns=columns)
+
+    recs.columns = [str(column).strip().lower() for column in recs.columns]
+    for column in columns:
+        if column not in recs.columns:
+            recs[column] = ""
+
+    recs = recs[columns].copy()
+    recs["muscle_group_key"] = recs["muscle_group"].str.strip().str.lower()
+    recs["priority_key"] = recs["priority"].str.strip().str.lower()
+    recs["priority_rank"] = recs["priority_key"].map(_PRIORITY_ORDER).fillna(99)
+    recs["stable_rank"] = recs.apply(
+        lambda row: 0
+        if any(
+            term in f"{row['category']} {row['exercise']}".strip().lower()
+            for term in _STABLE_CATEGORY_TERMS
+        )
+        else 1,
+        axis=1,
+    )
+    return recs
 
 
 def _score_exercise_sessions(session_stats: pd.DataFrame) -> list[dict[str, object]]:
@@ -388,6 +425,64 @@ def _recommendations(
     return recommendations[:6]
 
 
+def _suggested_exercises(
+    frequency_flags: list[dict[str, object]],
+    scores: list[dict[str, object]],
+    recommendations: list[str],
+) -> list[str]:
+    recs = _load_exercise_recommendations()
+    if recs.empty:
+        return ["No exercise recommendation config found."]
+
+    target_groups: list[tuple[str, bool]] = []
+    seen_targets: set[str] = set()
+
+    for row in frequency_flags:
+        group = str(row.get("muscle_group", "")).strip().lower()
+        if group and group not in seen_targets:
+            target_groups.append((group, False))
+            seen_targets.add(group)
+
+    for row in scores:
+        if row.get("status") != "declining":
+            continue
+        group = str(row.get("muscle_group", "")).strip().lower()
+        if group and group not in seen_targets:
+            target_groups.append((group, True))
+            seen_targets.add(group)
+
+    fatigue_high = any("risk" in item.lower() and "high" in item.lower() for item in recommendations)
+    if any("reps dropped" in item.lower() or "recovery" in item.lower() for item in recommendations):
+        fatigue_high = True
+
+    output: list[str] = []
+    used_exercises: set[str] = set()
+    for group, regression_related in target_groups[:5]:
+        group_recs = recs[recs["muscle_group_key"] == group].copy()
+        if group_recs.empty:
+            continue
+
+        sort_cols = ["priority_rank", "exercise"]
+        if regression_related or fatigue_high:
+            sort_cols = ["stable_rank", "priority_rank", "exercise"]
+
+        selected: list[str] = []
+        for row in group_recs.sort_values(sort_cols).itertuples(index=False):
+            exercise = str(row.exercise).strip()
+            key = exercise.lower()
+            if not exercise or key in used_exercises:
+                continue
+            selected.append(exercise)
+            used_exercises.add(key)
+            if len(selected) >= 3:
+                break
+
+        if selected:
+            output.append(f"{group.title()}: {', '.join(selected)}")
+
+    return output or ["No targeted exercise substitutions needed this week."]
+
+
 def build_weekly_insights(df: pd.DataFrame) -> dict[str, object]:
     if df.empty or "Date" not in df.columns:
         return _empty_insights()
@@ -410,6 +505,7 @@ def build_weekly_insights(df: pd.DataFrame) -> dict[str, object]:
     balance = _push_pull_legs_balance(latest)
     training_score = _weekly_training_score(scores, frequency_flags, balance)
     recommendations = _recommendations(scores, frequency_flags, balance)
+    suggested_exercises = _suggested_exercises(frequency_flags, scores, recommendations)
 
     if weekly_stats.empty and not scores:
         fallback = _empty_insights()
@@ -433,5 +529,6 @@ def build_weekly_insights(df: pd.DataFrame) -> dict[str, object]:
         ],
         "balance": balance,
         "recommendations": recommendations,
+        "suggested_exercises": suggested_exercises,
         "suggested_focus": recommendations[0],
     }

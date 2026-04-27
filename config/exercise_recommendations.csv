@@ -1,0 +1,21 @@
+muscle_group,category,exercise,priority
+Back,Horizontal Pull,Chest Supported Row,High
+Back,Horizontal Pull,Seated Cable Row,High
+Back,Vertical Pull,Lat Pulldown,High
+Back,Vertical Pull,Single Arm Lat Pulldown,Medium
+Chest,Press,Incline Dumbbell Press,High
+Chest,Press,Chest Press Machine,High
+Chest,Fly,Pec Deck,Medium
+Legs,Quad,Leg Press,High
+Legs,Quad,Hack Squat,High
+Legs,Hamstring,Leg Curl,Medium
+Legs,Calves,Seated Calf Raise,Medium
+Shoulders,Lateral Raise,Lateral Raise,Medium
+Shoulders,Press,Shoulder Press Machine,High
+Shoulders,Rear Delt,Rear Delt Fly,Medium
+Arms,Biceps,Cable Curl,Medium
+Arms,Biceps,Preacher Curl Machine,Medium
+Arms,Triceps,Cable Tricep Pushdown,Medium
+Arms,Triceps,Overhead Tricep Extension,Medium
+Core,Core,Ab Crunch Machine,Medium
+Core,Core,Hanging Leg Raise,Medium

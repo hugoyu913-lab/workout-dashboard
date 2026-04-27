@@ -4,6 +4,8 @@ Streamlit dashboard for a Google Sheets workout log. It pulls every worksheet in
 
 The dashboard includes a local rule-based weekly insight panel tuned for high-intensity cutting: exercise progression scores, progressing/stalled/declining status flags, muscle-group frequency gaps, fatigue/regression warnings, weekly training score, push/pull/legs balance, and next-week focus suggestions. It also includes a Strength Retention Score and Fatigue Risk Detector for the last 2-3 weeks, muscle group frequency by selected date range, a daily workout detail view, and a workout comparison table for checking each exercise against its most recent previous occurrence. It does not call an AI/API service.
 
+Suggested exercises are loaded from `config/exercise_recommendations.csv` and selected deterministically from frequency gaps, regressions, and recovery-sensitive situations.
+
 The project also includes Apple Health export parsing. A local `data/export.xml` can be converted into daily CSVs under `data/health/` for correlation analysis with training data.
 
 ## Setup
