@@ -34,6 +34,7 @@ workout-dashboard/
     apple_health.py
     charts.py
     cleaner.py
+    insights.py
     metrics.py
     sheets_client.py
   app.py
@@ -142,6 +143,7 @@ Date, Workout, Exercise, MuscleGroup, Category, Set, Weight, Reps, Volume, Sourc
 - Dashboard filters for date range, muscle group, exercise, and source sheet.
 - KPI cards for total volume, workouts, logged sets, and exercise count.
 - Charts for weekly volume, workout frequency, top exercises, estimated 1RM, muscle group volume, weekly muscle group heatmap, and PR timeline.
+- Rule-based weekly insight panel for progressing exercises, stalled exercises, muscle group volume, push/pull/legs balance, and suggested focus for the next week. This is local logic, not an API call.
 - Data tables for volume by exercise, PR tracker, and filtered raw rows.
 - Apple Health XML parsing into daily CSVs for steps, body weight, resting heart rate, HRV, active calories, sleep, nutrition, and VO2 max.
 - Health/workout correlation chart code for body composition, activity, nutrition, sleep, and full correlation matrix.

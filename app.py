@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from datetime import date
+from html import escape
 
 import pandas as pd
 import streamlit as st
@@ -20,6 +21,7 @@ from src.charts import (
     scatter_with_r2,
 )
 from src.cleaner import clean_workout_log
+from src.insights import build_weekly_insights
 from src.metrics import (
     daily_workout_metrics,
     estimated_1rm_by_exercise,
@@ -358,6 +360,54 @@ def metric_value(value: float) -> str:
     return f"{value:,.0f}"
 
 
+def _insight_list(items: list[str]) -> str:
+    return "".join(f"<li>{escape(str(item))}</li>" for item in items)
+
+
+def render_weekly_insights(df: pd.DataFrame) -> None:
+    insights = build_weekly_insights(df)
+    balance = insights["balance"]
+    muscle_group_volume = insights["muscle_group_volume"] or ["No muscle group volume this week."]
+    week_label = escape(str(insights["week_label"]))
+    suggested_focus = escape(str(insights["suggested_focus"]))
+    balance_summary = escape(str(balance["summary"]))
+
+    section_header("Weekly Training Insights")
+    st.markdown(
+        f"""
+        <div style="background:#111113;border:1px solid #1e1e22;border-left:3px solid #e8890c;
+                    border-radius:3px;padding:1rem 1.1rem;margin-bottom:0.75rem;">
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:0.62rem;
+                      letter-spacing:0.16em;text-transform:uppercase;color:#444450;">
+            Rule-Based Summary | {week_label}
+          </div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:0.78rem;
+                      color:#c8c8cc;margin-top:0.6rem;line-height:1.55;">
+            Suggested focus: <span style="color:#e8890c;">{suggested_focus}</span>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.markdown("##### Top Progressing")
+        st.markdown(f"<ul>{_insight_list(insights['top_progressing'])}</ul>", unsafe_allow_html=True)
+    with c2:
+        st.markdown("##### Stalled")
+        st.markdown(f"<ul>{_insight_list(insights['stalled'])}</ul>", unsafe_allow_html=True)
+    with c3:
+        st.markdown("##### Muscle Volume")
+        st.markdown(f"<ul>{_insight_list(muscle_group_volume)}</ul>", unsafe_allow_html=True)
+    with c4:
+        st.markdown("##### Push/Pull/Legs")
+        st.metric("Push", f"{balance['push']:.0f}%")
+        st.metric("Pull", f"{balance['pull']:.0f}%")
+        st.metric("Legs", f"{balance['legs']:.0f}%")
+        st.caption(balance_summary)
+
+
 def render_dashboard(df: pd.DataFrame) -> None:
     filtered = filter_frame(df)
 
@@ -375,6 +425,8 @@ def render_dashboard(df: pd.DataFrame) -> None:
     if filtered.empty:
         st.info("No rows match the selected filters.")
         return
+
+    render_weekly_insights(filtered)
 
     weekly = weekly_total_volume(filtered)
     frequency = workout_frequency(filtered)
