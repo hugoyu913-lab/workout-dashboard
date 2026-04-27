@@ -146,6 +146,7 @@ Date, Workout, Exercise, MuscleGroup, Category, Set, Weight, Reps, Volume, Sourc
 - Rule-based weekly insight panel tuned for high-intensity cutting: progression scores, progressing/stalled/declining exercise flags, muscle-group frequency gaps, fatigue/regression warnings, weekly training score, push/pull/legs balance, and suggested focus for the next week. This is local deterministic logic, not an API call.
 - Muscle group frequency section that counts unique workout dates per muscle group in the active sidebar-filtered date range and displays both a table and bar chart.
 - Daily workout detail section with a workout date selector, daily summary metrics, and an exact per-set table for `Exercise`, `Set`, `Weight`, `Reps`, `Volume`, `MuscleGroup`, `Category`, and `SourceSheet`.
+- Workout comparison section that compares each selected-day exercise against its most recent previous occurrence and flags `Improved`, `Same`, or `Regressed`.
 - Data tables for volume by exercise, PR tracker, and filtered raw rows.
 - Apple Health XML parsing into daily CSVs for steps, body weight, resting heart rate, HRV, active calories, sleep, nutrition, and VO2 max.
 - Health/workout correlation chart code for body composition, activity, nutrition, sleep, and full correlation matrix.

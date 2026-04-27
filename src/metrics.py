@@ -208,6 +208,96 @@ def daily_workout_summary(detail: pd.DataFrame) -> dict[str, object]:
     }
 
 
+def workout_comparison(df: pd.DataFrame, selected_date: object) -> pd.DataFrame:
+    columns = [
+        "Exercise",
+        "Current Weight",
+        "Current Reps",
+        "Previous Weight",
+        "Previous Reps",
+        "Weight Change",
+        "Rep Change",
+        "Status",
+    ]
+    if df.empty or "Date" not in df.columns or "Exercise" not in df.columns:
+        return pd.DataFrame(columns=columns)
+
+    target_date = pd.to_datetime(selected_date, errors="coerce")
+    if pd.isna(target_date):
+        return pd.DataFrame(columns=columns)
+
+    work = df.copy()
+    work["Date"] = pd.to_datetime(work["Date"], errors="coerce")
+    work = work.dropna(subset=["Date", "Exercise"])
+    current = work[work["Date"].dt.date == target_date.date()].copy()
+    if current.empty:
+        return pd.DataFrame(columns=columns)
+
+    records = []
+    for exercise, current_group in current.groupby("Exercise", sort=False):
+        current_best = (
+            current_group.sort_values(["Weight", "Reps"], ascending=[False, False], na_position="last")
+            .iloc[0]
+        )
+        previous_rows = work[
+            (work["Exercise"] == exercise)
+            & (work["Date"].dt.date < target_date.date())
+        ].copy()
+        if previous_rows.empty:
+            previous_weight = pd.NA
+            previous_reps = pd.NA
+            weight_change = pd.NA
+            rep_change = pd.NA
+            status = "No Previous"
+        else:
+            previous_date = previous_rows["Date"].max().date()
+            previous_group = previous_rows[previous_rows["Date"].dt.date == previous_date]
+            previous_best = (
+                previous_group.sort_values(["Weight", "Reps"], ascending=[False, False], na_position="last")
+                .iloc[0]
+            )
+            previous_weight = previous_best["Weight"]
+            previous_reps = previous_best["Reps"]
+            weight_change = current_best["Weight"] - previous_weight
+            rep_change = current_best["Reps"] - previous_reps
+
+            improved = (
+                pd.notna(weight_change)
+                and weight_change > 0
+            ) or (
+                pd.notna(rep_change)
+                and rep_change > 0
+            )
+            regressed = (
+                pd.notna(weight_change)
+                and weight_change < 0
+            ) or (
+                pd.notna(rep_change)
+                and rep_change < 0
+            )
+            if improved:
+                status = "Improved"
+            elif regressed:
+                status = "Regressed"
+            else:
+                status = "Same"
+
+        records.append(
+            {
+                "Exercise": exercise,
+                "Current Weight": current_best["Weight"],
+                "Current Reps": current_best["Reps"],
+                "Previous Weight": previous_weight,
+                "Previous Reps": previous_reps,
+                "Weight Change": weight_change,
+                "Rep Change": rep_change,
+                "Status": status,
+            }
+        )
+
+    return pd.DataFrame(records, columns=columns)
+
+
 def daily_workout_metrics(df: pd.DataFrame) -> pd.DataFrame:
     """One row per calendar day: total volume, best e1RM, set count."""
     work = df.dropna(subset=["Date"]).copy()

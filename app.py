@@ -36,6 +36,7 @@ from src.metrics import (
     volume_by_exercise,
     weekly_muscle_group_volume,
     weekly_total_volume,
+    workout_comparison,
     workout_frequency,
 )
 from src.sheets_client import (
@@ -456,6 +457,13 @@ def render_daily_workout_detail(df: pd.DataFrame, filtered: pd.DataFrame) -> Non
     c4.metric("Muscle Groups", str(summary["muscle_groups_trained"]))
 
     st.dataframe(detail, use_container_width=True, hide_index=True)
+
+    section_header("Workout Comparison")
+    comparison = workout_comparison(df, selected_date)
+    if comparison.empty:
+        st.info("No prior matching exercises found for this workout date.")
+    else:
+        st.dataframe(comparison, use_container_width=True, hide_index=True)
 
 
 def render_dashboard(df: pd.DataFrame) -> None:
