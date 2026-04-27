@@ -1,11 +1,24 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pandas as pd
 
 
-STANDARD_COLUMNS = ["Date", "Workout", "Exercise", "MuscleGroup", "Set", "Weight", "Reps", "Volume", "SourceSheet"]
+EXERCISE_MAP_PATH = Path("config/exercise_map.csv")
+STANDARD_COLUMNS = [
+    "Date",
+    "Workout",
+    "Exercise",
+    "MuscleGroup",
+    "Category",
+    "Set",
+    "Weight",
+    "Reps",
+    "Volume",
+    "SourceSheet",
+]
 
 COLUMN_ALIASES = {
     "date": "Date",
@@ -17,6 +30,9 @@ COLUMN_ALIASES = {
     "exercise": "Exercise",
     "movement": "Exercise",
     "lift": "Exercise",
+    "muscle group": "MuscleGroup",
+    "musclegroup": "MuscleGroup",
+    "category": "Category",
     "set": "Set",
     "sets": "Set",
     "set #": "Set",
@@ -180,6 +196,10 @@ MUSCLE_GROUP_MAP: dict[str, str] = {
 }
 
 
+def _exercise_key(value: object) -> str:
+    return re.sub(r"\s+", " ", str(value).strip().lower())
+
+
 def _normalize_column_name(name: object) -> str:
     cleaned = re.sub(r"\s+", " ", str(name).strip().lower())
     return COLUMN_ALIASES.get(cleaned, str(name).strip())
@@ -226,15 +246,74 @@ def _infer_missing_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _add_muscle_group(df: pd.DataFrame) -> pd.DataFrame:
+def _load_exercise_map(path: Path = EXERCISE_MAP_PATH) -> dict[str, dict[str, str]]:
+    if not path.exists():
+        return {}
+
+    try:
+        mapping_df = pd.read_csv(path, dtype=str).fillna("")
+    except Exception:
+        return {}
+
+    mapping_df.columns = [_exercise_key(column) for column in mapping_df.columns]
+    if "raw_name" not in mapping_df.columns or "standard_name" not in mapping_df.columns:
+        return {}
+
+    if "muscle_group" not in mapping_df.columns:
+        mapping_df["muscle_group"] = ""
+    if "category" not in mapping_df.columns:
+        mapping_df["category"] = ""
+
+    mapping: dict[str, dict[str, str]] = {}
+    for row in mapping_df.to_dict("records"):
+        raw_name = str(row.get("raw_name", "")).strip()
+        standard_name = str(row.get("standard_name", "")).strip()
+        if not raw_name or not standard_name:
+            continue
+
+        key = _exercise_key(raw_name)
+        standard_key = _exercise_key(standard_name)
+        muscle_group = str(row.get("muscle_group", "")).strip().lower()
+        category = str(row.get("category", "")).strip().lower()
+
+        mapping[key] = {
+            "standard_name": standard_name,
+            "muscle_group": muscle_group or MUSCLE_GROUP_MAP.get(standard_key, ""),
+            "category": category,
+        }
+
+    return mapping
+
+
+def _standardize_exercises(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
+    mapping = _load_exercise_map()
+
+    normalized = df["Exercise"].map(_exercise_key)
+    mapped = normalized.map(mapping)
+
+    standard_names = mapped.map(
+        lambda value: value.get("standard_name") if isinstance(value, dict) else None
+    )
+    df["Exercise"] = standard_names.fillna(df["Exercise"].astype(str).str.strip())
+
+    standardized_key = df["Exercise"].map(_exercise_key)
+    mapped_muscle_groups = mapped.map(
+        lambda value: value.get("muscle_group") if isinstance(value, dict) else None
+    )
+    fallback_muscle_groups = standardized_key.map(MUSCLE_GROUP_MAP).fillna(
+        normalized.map(MUSCLE_GROUP_MAP)
+    )
     df["MuscleGroup"] = (
-        df["Exercise"]
-        .str.strip()
-        .str.lower()
-        .map(MUSCLE_GROUP_MAP)
+        mapped_muscle_groups.replace("", pd.NA)
+        .fillna(fallback_muscle_groups)
         .fillna("other")
     )
+
+    mapped_categories = mapped.map(
+        lambda value: value.get("category") if isinstance(value, dict) else None
+    )
+    df["Category"] = mapped_categories.replace("", pd.NA).fillna("strength")
     return df
 
 
@@ -274,7 +353,7 @@ def clean_workout_log(raw: pd.DataFrame) -> pd.DataFrame:
 
     df = df.dropna(subset=["Exercise"])
     df = df[df["Weight"].notna() | df["Reps"].notna() | df["Volume"].notna()]
-    df = _add_muscle_group(df)
+    df = _standardize_exercises(df)
     df = df[STANDARD_COLUMNS].copy()
     df = df.sort_values(["Date", "SourceSheet", "Workout", "Exercise", "Set"], na_position="last")
     return df.reset_index(drop=True)

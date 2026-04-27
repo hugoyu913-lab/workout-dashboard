@@ -1,1 +1,84 @@
-raw_name,standard_name
+raw_name,standard_name,muscle_group,category
+bench,Bench Press,chest,horizontal push
+bench press,Bench Press,chest,horizontal push
+benchpress,Bench Press,chest,horizontal push
+cable fly,Cable Fly,chest,chest isolation
+chest press machine,Chest Press Machine,chest,horizontal push
+standing chest press,Standing Chest Press,chest,horizontal push
+dumbbell incline,Incline Dumbbell Press,chest,incline push
+incline dumbbell,Incline Dumbbell Press,chest,incline push
+incline machine,Incline Chest Press Machine,chest,incline push
+incline chest press machine,Incline Chest Press Machine,chest,incline push
+smith incline,Smith Machine Incline Press,chest,incline push
+smith machine incline,Smith Machine Incline Press,chest,incline push
+pec deck,Pec Deck,chest,chest isolation
+barbell row,Barbell Row,back,horizontal pull
+cable row,Cable Row,back,horizontal pull
+cable seated row,Seated Cable Row,back,horizontal pull
+seated cable row,Seated Cable Row,back,horizontal pull
+seated row,Seated Row,back,horizontal pull
+seated row machine,Seated Row Machine,back,horizontal pull
+chest suppirted row,Chest Supported Row,back,horizontal pull
+chest supported row,Chest Supported Row,back,horizontal pull
+dumbbell row,Dumbbell Row,back,horizontal pull
+lat pulldown,Lat Pulldown,back,vertical pull
+single arm lat pulldown,Single Arm Lat Pulldown,back,vertical pull
+reverse grip pulldown,Reverse Grip Pulldown,back,vertical pull
+lat pullover,Lat Pullover,back,pullover
+lat pullover machine,Lat Pullover Machine,back,pullover
+pull up,Pull Up,back,vertical pull
+pull ups,Pull Up,back,vertical pull
+pullups,Pull Up,back,vertical pull
+t bar row,T-Bar Row,back,horizontal pull
+tbar row,T-Bar Row,back,horizontal pull
+upper back row,Upper Back Row,back,horizontal pull
+shoulder press,Shoulder Press,shoulders,vertical push
+dumbbell shoulder press,Dumbbell Shoulder Press,shoulders,vertical push
+seated shoulder press,Seated Shoulder Press,shoulders,vertical push
+shoulder press machine,Shoulder Press Machine,shoulders,vertical push
+smith shoulder press,Smith Machine Shoulder Press,shoulders,vertical push
+cable lat raise,Cable Lateral Raise,shoulders,lateral delt
+cuffed lat raise,Cuffed Lateral Raise,shoulders,lateral delt
+lat raise machine,Lateral Raise Machine,shoulders,lateral delt
+lateral raise machine,Lateral Raise Machine,shoulders,lateral delt
+rear delt flt,Rear Delt Fly,shoulders,rear delt
+rear delt fly,Rear Delt Fly,shoulders,rear delt
+cable rear delt fly,Cable Rear Delt Fly,shoulders,rear delt
+bicep curl machine,Bicep Curl Machine,arms,biceps
+curl machine,Bicep Curl Machine,arms,biceps
+cable curl,Cable Curl,arms,biceps
+single cable curl,Single Arm Cable Curl,arms,biceps
+dumbbell bicep,Dumbbell Bicep Curl,arms,biceps
+dumbbell bicep curl,Dumbbell Bicep Curl,arms,biceps
+dumbbell curl,Dumbbell Curl,arms,biceps
+dumbbell hanmer,Dumbbell Hammer Curl,arms,biceps
+hammer curl,Hammer Curl,arms,biceps
+preachet curl machine,Preacher Curl Machine,arms,biceps
+preacher curl machine,Preacher Curl Machine,arms,biceps
+cable tricep pushdown,Cable Tricep Pushdown,arms,triceps
+tricep push down,Tricep Pushdown,arms,triceps
+tricep pushdown,Tricep Pushdown,arms,triceps
+single tricpe ext,Single Arm Tricep Extension,arms,triceps
+single tricep ext,Single Arm Tricep Extension,arms,triceps
+over head tricep,Overhead Tricep Extension,arms,triceps
+overhead tricep,Overhead Tricep Extension,arms,triceps
+skullcrusher ez bar,EZ Bar Skullcrusher,arms,triceps
+dips,Dips,arms,triceps
+leg press,Leg Press,legs,leg press
+single leg press,Single Leg Press,legs,leg press
+pendulum squat,Pendulum Squat,legs,squat
+sumo squat,Sumo Squat,legs,squat
+goblin squat,Goblet Squat,legs,squat
+leg extension,Leg Extension,legs,quad isolation
+leg curl,Leg Curl,legs,hamstring isolation
+calf raise,Calf Raise,legs,calves
+seated calf raise,Seated Calf Raise,legs,calves
+standing calf raise,Standing Calf Raise,legs,calves
+hip abductors,Hip Abductor,legs,hip isolation
+hip adductor,Hip Adductor,legs,hip isolation
+ab crunch machine,Ab Crunch Machine,core,core
+crunch machine,Ab Crunch Machine,core,core
+decline situp,Decline Sit-Up,core,core
+hanging leg raise,Hanging Leg Raise,core,core
+leg raise,Leg Raise,core,core
+leg raises,Leg Raise,core,core

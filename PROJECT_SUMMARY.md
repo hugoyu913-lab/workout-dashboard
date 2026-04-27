@@ -132,12 +132,13 @@ data/health/
 - Workout log cleaning and normalization into:
 
 ```text
-Date, Workout, Exercise, MuscleGroup, Set, Weight, Reps, Volume, SourceSheet
+Date, Workout, Exercise, MuscleGroup, Category, Set, Weight, Reps, Volume, SourceSheet
 ```
 
 - Numeric cleanup for weight, reps, set, and volume fields.
 - Forward fill for dates, workouts, and exercises where set rows omit repeated values.
-- Muscle group classification from a built-in exercise name map.
+- Case-insensitive exercise alias standardization from `config/exercise_map.csv`.
+- Muscle group and category classification from `config/exercise_map.csv`, with built-in muscle group fallback.
 - Dashboard filters for date range, muscle group, exercise, and source sheet.
 - KPI cards for total volume, workouts, logged sets, and exercise count.
 - Charts for weekly volume, workout frequency, top exercises, estimated 1RM, muscle group volume, weekly muscle group heatmap, and PR timeline.
@@ -151,7 +152,7 @@ Date, Workout, Exercise, MuscleGroup, Set, Weight, Reps, Volume, SourceSheet
 - `app.py` imports `render_uploader` from `src.apple_health`, but `src/apple_health.py` currently defines `render_sidebar_widget()` instead. As written, this will cause an import error before the app can start.
 - `app.py` expects health dataframe columns such as `resting_hr`, `active_calories`, `hrv`, and `calories_in`, while `src/apple_health.py` writes columns such as `resting_hr_bpm`, `active_calories_kcal`, `hrv_ms`, and `calories_kcal`. The correlation page needs column-name alignment after the import issue is fixed.
 - `README.md` previously documented only `config/credentials.json`, but the current local key is `credentials.json`. Both are supported by the app.
-- `config/exercise_map.csv` exists but is not currently used by the cleaning code; muscle group mapping is hard-coded in `src/cleaner.py`.
+- `config/exercise_map.csv` now drives exercise standardization, muscle groups, and categories, but unmapped exercises still depend on the built-in fallback map or become `other`.
 - The Apple Health XML export is large and local (`data/export.xml`, about 354 MB). Re-parsing is a local preprocessing step and may be slow.
 - The repository currently contains local data and credential files. `.gitignore` excludes credentials, secrets, virtual environments, and Python cache folders, but already-present local files should still be handled carefully.
 - No automated test suite is present. `test_auth.py` is a manual connectivity check, not a pytest-style test.
@@ -162,7 +163,7 @@ Date, Workout, Exercise, MuscleGroup, Set, Weight, Reps, Volume, SourceSheet
 ## Recommended Next Upgrades
 
 1. Fix the Apple Health Streamlit integration by either renaming `render_sidebar_widget()` to `render_uploader()` or updating the import in `app.py`, then align health column names used by the correlation page.
-2. Move exercise-to-muscle-group mappings into `config/exercise_map.csv` and load them dynamically, keeping the hard-coded map as a fallback if desired.
+2. Continue expanding `config/exercise_map.csv` as new aliases appear in the workout log.
 3. Add a small pytest suite for sheet parsing, cleaning, metric calculations, and Apple Health column merging.
 4. Add a startup health check that reports which auth source is active and whether the current spreadsheet is reachable.
 5. Add a sample sanitized workbook or fixture data so the dashboard can be tested without private Google Sheets access.

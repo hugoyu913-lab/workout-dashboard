@@ -76,10 +76,18 @@ The Google Sheets parser expects each workout session to begin with a block head
 The cleaner standardizes the final dataframe to:
 
 ```text
-Date, Workout, Exercise, MuscleGroup, Set, Weight, Reps, Volume, SourceSheet
+Date, Workout, Exercise, MuscleGroup, Category, Set, Weight, Reps, Volume, SourceSheet
 ```
 
 It accepts common aliases such as `movement`, `lift`, `lbs`, `load`, `rep`, and `total volume`. Blank rows are ignored. If an exercise name appears once and following set rows omit it, the dashboard forward-fills the exercise so those rows are counted under the same movement.
+
+Exercise names are standardized case-insensitively from `config/exercise_map.csv`, which supports:
+
+```text
+raw_name, standard_name, muscle_group, category
+```
+
+Older two-column maps with only `raw_name` and `standard_name` still work. Missing muscle groups fall back to the built-in map, and missing categories default to `strength`.
 
 ## Current Notes
 

@@ -10,12 +10,21 @@ def weekly_total_volume(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def volume_by_exercise(df: pd.DataFrame) -> pd.DataFrame:
-    return (
-        df.groupby("Exercise", as_index=False)["Volume"]
-        .sum()
+    grouped = (
+        df.groupby("Exercise", as_index=False)
+        .agg(
+            Volume=("Volume", "sum"),
+            MuscleGroup=("MuscleGroup", "first") if "MuscleGroup" in df.columns else ("Exercise", "first"),
+            Category=("Category", "first") if "Category" in df.columns else ("Exercise", "first"),
+        )
         .sort_values("Volume", ascending=False)
         .reset_index(drop=True)
     )
+    drop_columns = [
+        column for column in ("MuscleGroup", "Category")
+        if column in grouped.columns and grouped[column].equals(grouped["Exercise"])
+    ]
+    return grouped.drop(columns=drop_columns)
 
 
 def estimated_1rm_by_exercise(df: pd.DataFrame) -> pd.DataFrame:
@@ -82,6 +91,8 @@ def top_exercises_by_volume(df: pd.DataFrame, limit: int = 10) -> pd.DataFrame:
 
 
 def muscle_group_volume(df: pd.DataFrame) -> pd.DataFrame:
+    if "MuscleGroup" not in df.columns:
+        return pd.DataFrame(columns=["MuscleGroup", "Volume"])
     return (
         df.dropna(subset=["MuscleGroup"])
         .groupby("MuscleGroup", as_index=False)["Volume"]
@@ -92,9 +103,31 @@ def muscle_group_volume(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def weekly_muscle_group_volume(df: pd.DataFrame) -> pd.DataFrame:
+    if "MuscleGroup" not in df.columns:
+        return pd.DataFrame(columns=["Week", "MuscleGroup", "Volume"])
     work = df.dropna(subset=["Date", "MuscleGroup"]).copy()
     work["Week"] = work["Date"].dt.to_period("W").dt.start_time
     return work.groupby(["Week", "MuscleGroup"], as_index=False)["Volume"].sum()
+
+
+def category_volume(df: pd.DataFrame) -> pd.DataFrame:
+    if "Category" not in df.columns:
+        return pd.DataFrame(columns=["Category", "Volume"])
+    return (
+        df.dropna(subset=["Category"])
+        .groupby("Category", as_index=False)["Volume"]
+        .sum()
+        .sort_values("Volume", ascending=False)
+        .reset_index(drop=True)
+    )
+
+
+def weekly_category_volume(df: pd.DataFrame) -> pd.DataFrame:
+    if "Category" not in df.columns:
+        return pd.DataFrame(columns=["Week", "Category", "Volume"])
+    work = df.dropna(subset=["Date", "Category"]).copy()
+    work["Week"] = work["Date"].dt.to_period("W").dt.start_time
+    return work.groupby(["Week", "Category"], as_index=False)["Volume"].sum()
 
 
 def daily_workout_metrics(df: pd.DataFrame) -> pd.DataFrame:

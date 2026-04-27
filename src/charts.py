@@ -19,6 +19,28 @@ _GROUP_COLORS = {
     "other": "#c084fc",
 }
 
+_CATEGORY_COLORS = {
+    "horizontal push": "#60a5fa",
+    "vertical push": "#38bdf8",
+    "incline push": "#818cf8",
+    "horizontal pull": "#4ade80",
+    "vertical pull": "#22c55e",
+    "pullover": "#84cc16",
+    "biceps": "#f87171",
+    "triceps": "#fb7185",
+    "lateral delt": "#fb923c",
+    "rear delt": "#fdba74",
+    "leg press": "#2dd4bf",
+    "squat": "#14b8a6",
+    "quad isolation": "#5eead4",
+    "hamstring isolation": "#0f766e",
+    "calves": "#99f6e4",
+    "hip isolation": "#67e8f9",
+    "core": "#fbbf24",
+    "strength": "#c084fc",
+    "other": "#a3a3a3",
+}
+
 _BASE_LAYOUT = dict(
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(20,20,22,0.6)",
@@ -150,13 +172,36 @@ def scatter_estimated_1rm(df: pd.DataFrame) -> go.Figure:
 def bar_muscle_group_volume(df: pd.DataFrame) -> go.Figure:
     if df.empty:
         return empty_figure("No muscle group data")
+    work = df.copy()
+    work["MuscleGroup"] = work["MuscleGroup"].astype(str).str.lower()
     fig = px.bar(
-        df,
+        work,
         x="MuscleGroup",
         y="Volume",
         color="MuscleGroup",
         color_discrete_map=_GROUP_COLORS,
         labels={"MuscleGroup": "Muscle Group", "Volume": "Total Volume (lbs)"},
+    )
+    fig.update_traces(
+        hovertemplate="<b>%{x}</b><br>%{y:,.0f} lbs<extra></extra>",
+        marker_line_width=0,
+    )
+    fig.update_layout(showlegend=False, xaxis_title="", yaxis_title="Volume (lbs)")
+    return _apply_theme(fig)
+
+
+def bar_category_volume(df: pd.DataFrame) -> go.Figure:
+    if df.empty:
+        return empty_figure("No category data")
+    work = df.copy()
+    work["Category"] = work["Category"].astype(str).str.lower()
+    fig = px.bar(
+        work,
+        x="Category",
+        y="Volume",
+        color="Category",
+        color_discrete_map=_CATEGORY_COLORS,
+        labels={"Category": "Category", "Volume": "Total Volume (lbs)"},
     )
     fig.update_traces(
         hovertemplate="<b>%{x}</b><br>%{y:,.0f} lbs<extra></extra>",
