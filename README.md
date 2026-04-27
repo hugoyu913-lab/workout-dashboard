@@ -6,6 +6,8 @@ The dashboard includes a local rule-based weekly insight panel tuned for high-in
 
 Suggested exercises are loaded from `config/exercise_recommendations.csv` and selected deterministically from frequency gaps, regressions, and recovery-sensitive situations.
 
+The Next Workout Recommendation uses the same local signals to choose a simple Push, Pull, Legs, Upper, or Recovery focus with exercises, sets/reps, and intensity guidance.
+
 The project also includes Apple Health export parsing. A local `data/export.xml` can be converted into daily CSVs under `data/health/` for correlation analysis with training data.
 
 ## Setup

@@ -483,6 +483,163 @@ def _suggested_exercises(
     return output or ["No targeted exercise substitutions needed this week."]
 
 
+def _focus_for_muscle_group(muscle_group: str) -> str:
+    group = muscle_group.lower()
+    if group in {"back", "biceps"}:
+        return "Pull"
+    if group in {"chest", "shoulders", "triceps"}:
+        return "Push"
+    if group == "legs":
+        return "Legs"
+    return "Upper"
+
+
+def _rep_range_for_category(category: str) -> str:
+    category_key = category.lower()
+    if any(term in category_key for term in ("lateral", "rear", "fly", "calves", "core")):
+        return "10-15"
+    return "6-8"
+
+
+def _recommended_exercise_rows(
+    muscle_groups: list[str],
+    fatigue_sensitive: bool,
+    limit: int = 3,
+) -> list[dict[str, str]]:
+    recs = _load_exercise_recommendations()
+    if recs.empty:
+        return []
+
+    selected: list[dict[str, str]] = []
+    used: set[str] = set()
+    for group in muscle_groups:
+        group_recs = recs[recs["muscle_group_key"] == group.lower()].copy()
+        if group_recs.empty:
+            continue
+        sort_cols = ["stable_rank", "priority_rank", "exercise"] if fatigue_sensitive else ["priority_rank", "exercise"]
+        for row in group_recs.sort_values(sort_cols).itertuples(index=False):
+            exercise = str(row.exercise).strip()
+            key = exercise.lower()
+            if not exercise or key in used:
+                continue
+            selected.append(
+                {
+                    "muscle_group": str(row.muscle_group).strip(),
+                    "category": str(row.category).strip(),
+                    "exercise": exercise,
+                    "sets_reps": f"2 sets of {_rep_range_for_category(str(row.category))}",
+                }
+            )
+            used.add(key)
+            if len(selected) >= limit:
+                return selected
+    return selected
+
+
+def _least_trained_groups(work: pd.DataFrame, latest_week: pd.Timestamp) -> list[str]:
+    if "MuscleGroup" not in work.columns:
+        return ["back"]
+    latest = work[work["Week"] == latest_week].dropna(subset=["MuscleGroup"]).copy()
+    if latest.empty:
+        return ["back"]
+    frequency = (
+        latest.assign(MuscleGroup=latest["MuscleGroup"].astype(str).str.lower())
+        .groupby("MuscleGroup", as_index=False)["Date"]
+        .nunique()
+        .sort_values(["Date", "MuscleGroup"], ascending=[True, True])
+    )
+    return [str(row.MuscleGroup) for row in frequency.itertuples(index=False) if row.MuscleGroup not in {"other", "unknown"}]
+
+
+def build_next_workout_recommendation(df: pd.DataFrame) -> dict[str, object]:
+    from src.metrics import fatigue_risk_detector, strength_retention_score
+
+    if df.empty or "Date" not in df.columns:
+        return {
+            "recommended_focus": "Recovery",
+            "reason": "No workout history is available yet.",
+            "suggested_exercises": ["Easy walk or mobility work"],
+            "recommended_sets_reps": "Keep it easy",
+            "intensity_guidance": "Stay well short of failure.",
+        }
+
+    work = _add_week(df)
+    if work.empty:
+        return {
+            "recommended_focus": "Recovery",
+            "reason": "No dated workout history is available yet.",
+            "suggested_exercises": ["Easy walk or mobility work"],
+            "recommended_sets_reps": "Keep it easy",
+            "intensity_guidance": "Stay well short of failure.",
+        }
+
+    latest_week = work["Week"].max()
+    session_stats = _session_exercise_stats(work)
+    scores = _score_exercise_sessions(session_stats)
+    frequency_flags = _muscle_group_frequency(work, latest_week)
+    fatigue = fatigue_risk_detector(df)
+    retention = strength_retention_score(df)
+
+    fatigue_high = fatigue["risk"] == "High"
+    fatigue_moderate = fatigue["risk"] == "Moderate"
+    low_retention = float(retention.get("score", 0)) < 70 and int(retention.get("exercise_count", 0)) > 0
+
+    gap_groups = [str(row["muscle_group"]).lower() for row in frequency_flags]
+    declining_groups = [
+        str(row.get("muscle_group", "")).lower()
+        for row in scores
+        if row.get("status") == "declining" and row.get("muscle_group")
+    ]
+
+    target_groups = []
+    for group in gap_groups + declining_groups:
+        if group and group not in target_groups and group not in {"other", "unknown"}:
+            target_groups.append(group)
+    if not target_groups:
+        target_groups = _least_trained_groups(work, latest_week)
+
+    if fatigue_high:
+        focus = "Recovery"
+        reason = "Fatigue risk is high, so the next session should reduce recovery cost while preserving movement practice."
+        intensity = "Train at 1-2 RIR. Avoid grinding reps and heavy compounds."
+        exercises = _recommended_exercise_rows(target_groups, fatigue_sensitive=True, limit=3)
+        if not exercises:
+            exercises = [
+                {"exercise": "Easy walk or mobility work", "sets_reps": "20-30 minutes", "category": "Recovery", "muscle_group": "Recovery"}
+            ]
+    elif target_groups:
+        primary_group = target_groups[0]
+        focus = _focus_for_muscle_group(primary_group)
+        if frequency_flags:
+            reason = f"{primary_group.title()} frequency is below target and fatigue risk is {fatigue['risk'].lower()}."
+        elif low_retention:
+            reason = "Strength retention is below target; prioritize key movement patterns with conservative volume."
+        else:
+            reason = f"{primary_group.title()} is the least-trained or most recovery-sensitive area this week."
+        intensity = "Train at 0-1 RIR on stable movements. Stop before form breaks."
+        if fatigue_moderate or low_retention:
+            intensity = "Train at 1 RIR. Avoid grinding reps."
+        exercises = _recommended_exercise_rows(target_groups, fatigue_sensitive=(fatigue_moderate or low_retention), limit=3)
+    else:
+        focus = "Upper"
+        reason = "Frequency, fatigue, and strength retention look acceptable; use a balanced low-volume session."
+        intensity = "Train at 0-1 RIR, but avoid adding extra volume."
+        exercises = _recommended_exercise_rows(["back", "chest", "shoulders"], fatigue_sensitive=False, limit=3)
+
+    exercise_lines = [
+        f"{row['exercise']} - {row['sets_reps']}"
+        for row in exercises
+    ]
+
+    return {
+        "recommended_focus": focus,
+        "reason": reason,
+        "suggested_exercises": exercise_lines,
+        "recommended_sets_reps": "2 working sets per exercise",
+        "intensity_guidance": intensity,
+    }
+
+
 def build_weekly_insights(df: pd.DataFrame) -> dict[str, object]:
     if df.empty or "Date" not in df.columns:
         return _empty_insights()

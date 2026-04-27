@@ -22,7 +22,7 @@ from src.charts import (
     scatter_with_r2,
 )
 from src.cleaner import clean_workout_log
-from src.insights import build_weekly_insights
+from src.insights import build_next_workout_recommendation, build_weekly_insights
 from src.metrics import (
     daily_workout_detail,
     daily_workout_metrics,
@@ -431,6 +431,28 @@ def render_weekly_insights(df: pd.DataFrame) -> None:
 
     st.markdown("##### Suggested Exercises")
     st.markdown(f"<ul>{_insight_list(suggested_exercises)}</ul>", unsafe_allow_html=True)
+
+    next_workout = build_next_workout_recommendation(df)
+    st.markdown("##### Next Workout Recommendation")
+    st.markdown(
+        f"""
+        <div style="background:#111113;border:1px solid #1e1e22;border-left:3px solid #60a5fa;
+                    border-radius:3px;padding:0.9rem 1rem;margin-top:0.4rem;">
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:0.78rem;color:#c8c8cc;">
+            Recommended Focus: <span style="color:#60a5fa;">{escape(str(next_workout['recommended_focus']))}</span>
+          </div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:0.68rem;color:#888890;margin-top:0.45rem;">
+            {escape(str(next_workout['reason']))}
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown(f"<ul>{_insight_list(next_workout['suggested_exercises'])}</ul>", unsafe_allow_html=True)
+    st.caption(
+        f"Sets/Reps: {next_workout['recommended_sets_reps']} | "
+        f"Intensity: {next_workout['intensity_guidance']}"
+    )
 
 
 def render_daily_workout_detail(df: pd.DataFrame, filtered: pd.DataFrame) -> None:
