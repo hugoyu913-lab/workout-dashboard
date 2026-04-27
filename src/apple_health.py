@@ -12,8 +12,8 @@ Loading (fast, reads pre-built CSVs):
     hd.merged()       # all metrics joined on date
 
 Streamlit sidebar widget:
-    from src.apple_health import render_sidebar_widget
-    hd = render_sidebar_widget()
+    from src.apple_health import render_uploader
+    hd = render_uploader()
 """
 
 from __future__ import annotations
@@ -356,3 +356,8 @@ def render_sidebar_widget() -> HealthData:
             st.caption("Place export.xml in data/ to enable parsing.")
 
     return hd
+
+
+def render_uploader() -> HealthData:
+    """Backward-compatible app entry point for the Apple Health sidebar widget."""
+    return render_sidebar_widget()

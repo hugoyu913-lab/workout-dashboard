@@ -190,6 +190,27 @@ def bar_muscle_group_volume(df: pd.DataFrame) -> go.Figure:
     return _apply_theme(fig)
 
 
+def bar_muscle_group_frequency(df: pd.DataFrame) -> go.Figure:
+    if df.empty:
+        return empty_figure("No muscle group frequency data")
+    work = df.copy()
+    work["MuscleGroup"] = work["MuscleGroup"].astype(str).str.lower()
+    fig = px.bar(
+        work,
+        x="MuscleGroup",
+        y="Sessions Trained",
+        color="MuscleGroup",
+        color_discrete_map=_GROUP_COLORS,
+        labels={"MuscleGroup": "Muscle Group", "Sessions Trained": "Sessions Trained"},
+    )
+    fig.update_traces(
+        hovertemplate="<b>%{x}</b><br>Sessions: %{y}<extra></extra>",
+        marker_line_width=0,
+    )
+    fig.update_layout(showlegend=False, xaxis_title="", yaxis_title="Sessions Trained")
+    return _apply_theme(fig)
+
+
 def bar_category_volume(df: pd.DataFrame) -> go.Figure:
     if df.empty:
         return empty_figure("No category data")

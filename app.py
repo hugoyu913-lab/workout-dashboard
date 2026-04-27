@@ -9,6 +9,7 @@ import streamlit as st
 
 from src.apple_health import render_uploader as health_uploader
 from src.charts import (
+    bar_muscle_group_frequency,
     bar_muscle_group_volume,
     bar_top_exercises,
     correlation_heatmap,
@@ -26,6 +27,7 @@ from src.metrics import (
     daily_workout_metrics,
     estimated_1rm_by_exercise,
     estimated_1rm_over_time,
+    muscle_group_frequency,
     muscle_group_volume,
     pr_tracker,
     top_exercises_by_volume,
@@ -441,6 +443,14 @@ def render_dashboard(df: pd.DataFrame) -> None:
         return
 
     render_weekly_insights(filtered)
+
+    section_header("Muscle Group Frequency")
+    mg_frequency = muscle_group_frequency(filtered)
+    left, right = st.columns(2)
+    with left:
+        st.dataframe(mg_frequency, use_container_width=True, hide_index=True)
+    with right:
+        st.plotly_chart(bar_muscle_group_frequency(mg_frequency), use_container_width=True)
 
     weekly = weekly_total_volume(filtered)
     frequency = workout_frequency(filtered)

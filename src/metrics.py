@@ -102,6 +102,29 @@ def muscle_group_volume(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def muscle_group_frequency(df: pd.DataFrame) -> pd.DataFrame:
+    if "MuscleGroup" not in df.columns:
+        return pd.DataFrame(columns=["MuscleGroup", "Sessions Trained"])
+
+    work = df.dropna(subset=["Date", "MuscleGroup"]).copy()
+    work["MuscleGroup"] = work["MuscleGroup"].astype(str).str.strip()
+    work = work[
+        work["MuscleGroup"].ne("")
+        & work["MuscleGroup"].str.lower().ne("unknown")
+        & work["MuscleGroup"].str.lower().ne("other")
+    ]
+    if work.empty:
+        return pd.DataFrame(columns=["MuscleGroup", "Sessions Trained"])
+
+    return (
+        work.groupby("MuscleGroup", as_index=False)["Date"]
+        .nunique()
+        .rename(columns={"Date": "Sessions Trained"})
+        .sort_values(["Sessions Trained", "MuscleGroup"], ascending=[False, True])
+        .reset_index(drop=True)
+    )
+
+
 def weekly_muscle_group_volume(df: pd.DataFrame) -> pd.DataFrame:
     if "MuscleGroup" not in df.columns:
         return pd.DataFrame(columns=["Week", "MuscleGroup", "Volume"])
