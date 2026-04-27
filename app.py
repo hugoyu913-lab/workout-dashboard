@@ -368,7 +368,7 @@ def render_weekly_insights(df: pd.DataFrame) -> None:
     insights = build_weekly_insights(df)
     balance = insights["balance"]
     muscle_group_volume = insights["muscle_group_volume"] or ["No muscle group volume this week."]
-    undertrained = insights.get("undertrained_muscle_groups") or ["No undertrained muscle groups detected."]
+    undertrained = insights.get("undertrained_muscle_groups") or ["No muscle group frequency gaps detected."]
     recommendations = insights.get("recommendations") or [insights["suggested_focus"]]
     week_label = escape(str(insights["week_label"]))
     suggested_focus = escape(str(insights["suggested_focus"]))
@@ -415,7 +415,7 @@ def render_weekly_insights(df: pd.DataFrame) -> None:
 
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("##### Undertrained")
+        st.markdown("##### Frequency Gaps")
         st.markdown(f"<ul>{_insight_list(undertrained)}</ul>", unsafe_allow_html=True)
     with c2:
         st.markdown("##### Recommendations")
