@@ -503,17 +503,17 @@ def daily_workout_metrics(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _score_to_grade(score: float) -> str:
-    if score >= 92:
-        return "A+"
     if score >= 85:
+        return "A+"
+    if score >= 75:
         return "A"
-    if score >= 78:
+    if score >= 65:
         return "B+"
-    if score >= 70:
-        return "B"
     if score >= 55:
+        return "B"
+    if score >= 45:
         return "C"
-    if score >= 40:
+    if score >= 35:
         return "D"
     return "F"
 
@@ -530,22 +530,26 @@ def _grade_color(grade: str) -> str:
 
 def _grade_coaching_comment(grade: str) -> str:
     if grade in ("A+", "A"):
-        return "Excellent session — strength holding strong on this cut."
-    if grade in ("B+", "B"):
-        return "Solid work — minor improvements available."
+        return "Strength holding on this cut — excellent."
+    if grade == "B+":
+        return "Solid cut session — consistency is key."
+    if grade == "B":
+        return "Expected cut performance — stay the course."
     if grade == "C":
-        return "Maintenance mode — watch for fatigue accumulation."
-    return "Recovery session needed — consider deload."
+        return "Minor regression — normal on a deficit, monitor next session."
+    if grade == "D":
+        return "Multiple regressions — consider 1-2 RIR this week."
+    return "Recovery session needed — take a lighter day."
 
 
 def grade_session(df: pd.DataFrame, session_date=None) -> dict[str, object]:
     """Grade a single training session (0-100) across four components.
 
-    Components (weights):
-      Strength performance    40% — exercises improved or maintained vs previous
-      Rep range adherence     25% — sets within TARGET_REPS range
-      Volume vs average       20% — session volume relative to personal average
-      Consistency             15% — set count relative to personal average
+    Components (weights — cut-phase calibration):
+      Consistency             35% — set count relative to personal average
+      Strength performance    30% — exercises improved or maintained vs previous
+      Rep range adherence     20% — sets within TARGET_REPS range
+      Volume vs average       15% — session volume relative to personal average
     """
     empty: dict[str, object] = {
         "date": None,
@@ -673,11 +677,12 @@ def grade_session(df: pd.DataFrame, session_date=None) -> dict[str, object]:
     consistency_score = min(today_sets / avg_sets * 100, 100.0) if avg_sets > 0 else 50.0
 
     # ── Composite ────────────────────────────────────────────────────────
+    # Cut-phase weights: completing sets (consistency) is #1 priority
     composite = (
-        strength_score * 0.40
-        + rep_score * 0.25
-        + volume_score * 0.20
-        + consistency_score * 0.15
+        strength_score * 0.30
+        + rep_score * 0.20
+        + volume_score * 0.15
+        + consistency_score * 0.35
     )
     grade = _score_to_grade(composite)
 

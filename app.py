@@ -91,6 +91,12 @@ html, body,
 
 * { font-family: 'IBM Plex Mono', monospace !important; }
 
+/* Restore Material Symbols font so Streamlit icons render correctly */
+.material-symbols-rounded,
+[class*="material-symbols-"] {
+    font-family: 'Material Symbols Rounded' !important;
+}
+
 h1, h2, h3, h4, h5, h6 {
     font-family: 'Bebas Neue', cursive !important;
     letter-spacing: 0.06em !important;
@@ -986,10 +992,10 @@ def render_today_grade(df: pd.DataFrame) -> None:
         )
     with col_details:
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Strength (40%)", f"{g['strength_score']:.0f}")
-        c2.metric("Rep Range (25%)", f"{g['rep_adherence_score']:.0f}")
-        c3.metric("Volume (20%)", f"{g['volume_score']:.0f}")
-        c4.metric("Consistency (15%)", f"{g['consistency_score']:.0f}")
+        c1.metric("Consistency (35%)", f"{g['consistency_score']:.0f}")
+        c2.metric("Strength (30%)", f"{g['strength_score']:.0f}")
+        c3.metric("Rep Range (20%)", f"{g['rep_adherence_score']:.0f}")
+        c4.metric("Volume (15%)", f"{g['volume_score']:.0f}")
         st.markdown(
             f"<p style='color:#888890;font-size:0.78rem;margin-top:0.6rem;"
             f"font-style:italic;'>{escape(g['coaching_comment'])}</p>",
@@ -1024,6 +1030,7 @@ def render_sessions_history(df: pd.DataFrame) -> None:
 
         display = history.drop(columns=["_grade_group"], errors="ignore").copy()
         display["Date"] = display["Date"].dt.strftime("%Y-%m-%d")
+        display["Score"] = display["Score"].map(lambda x: f"{float(x):.1f}")
         styled = display.style.apply(_row_style, axis=1)
         st.dataframe(styled, use_container_width=True, hide_index=True)
     with right:

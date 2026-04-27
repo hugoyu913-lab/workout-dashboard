@@ -534,7 +534,8 @@ def bar_grade_distribution(history_df: pd.DataFrame) -> go.Figure:
         "C": "#f59e0b", "D": "#ef4444", "F": "#ef4444",
     }
     counts = history_df["Grade"].value_counts()
-    grades = [g for g in grade_order if g in counts.index]
+    # F at bottom → A+ at top for a horizontal bar
+    grades = [g for g in reversed(grade_order) if g in counts.index]
     if not grades:
         return empty_figure("No grade history yet")
     values = [int(counts[g]) for g in grades]
@@ -544,14 +545,20 @@ def bar_grade_distribution(history_df: pd.DataFrame) -> go.Figure:
         y=grades,
         orientation="h",
         marker=dict(color=colors, line=dict(width=0)),
+        text=[str(v) for v in values],
+        textposition="outside",
+        textfont=dict(color="#888890", size=11, family=_FONT),
+        cliponaxis=False,
         hovertemplate="<b>%{y}</b>: %{x} session(s)<extra></extra>",
     ))
+    fig = _apply_theme(fig)
+    x_max = max(values) * 1.35 if values else 5
     fig.update_layout(
-        yaxis={"categoryorder": "array", "categoryarray": list(reversed(grades))},
-        xaxis_title="Sessions",
-        xaxis=dict(dtick=1),
+        xaxis=dict(title="Sessions", dtick=1, range=[0, x_max]),
+        yaxis=dict(tickfont=dict(color="#c8c8cc", size=13, family=_FONT)),
+        margin=dict(l=12, r=44, t=28, b=12),
     )
-    return _apply_theme(fig)
+    return fig
 
 
 def correlation_heatmap(corr_matrix: pd.DataFrame, title: str = "Correlation Matrix") -> go.Figure:
