@@ -368,9 +368,12 @@ def render_weekly_insights(df: pd.DataFrame) -> None:
     insights = build_weekly_insights(df)
     balance = insights["balance"]
     muscle_group_volume = insights["muscle_group_volume"] or ["No muscle group volume this week."]
+    undertrained = insights.get("undertrained_muscle_groups") or ["No undertrained muscle groups detected."]
+    recommendations = insights.get("recommendations") or [insights["suggested_focus"]]
     week_label = escape(str(insights["week_label"]))
     suggested_focus = escape(str(insights["suggested_focus"]))
     balance_summary = escape(str(balance["summary"]))
+    weekly_score = float(insights.get("weekly_score", 0))
 
     section_header("Weekly Training Insights")
     st.markdown(
@@ -383,7 +386,9 @@ def render_weekly_insights(df: pd.DataFrame) -> None:
           </div>
           <div style="font-family:'IBM Plex Mono',monospace;font-size:0.78rem;
                       color:#c8c8cc;margin-top:0.6rem;line-height:1.55;">
-            Suggested focus: <span style="color:#e8890c;">{suggested_focus}</span>
+            Training score: <span style="color:#e8890c;">{weekly_score:.0f}/100</span>
+            &nbsp;|&nbsp; Suggested focus:
+            <span style="color:#e8890c;">{suggested_focus}</span>
           </div>
         </div>
         """,
@@ -395,8 +400,9 @@ def render_weekly_insights(df: pd.DataFrame) -> None:
         st.markdown("##### Top Progressing")
         st.markdown(f"<ul>{_insight_list(insights['top_progressing'])}</ul>", unsafe_allow_html=True)
     with c2:
-        st.markdown("##### Stalled")
-        st.markdown(f"<ul>{_insight_list(insights['stalled'])}</ul>", unsafe_allow_html=True)
+        st.markdown("##### Stalled / Declining")
+        combined_risks = list(insights["stalled"]) + list(insights.get("declining", []))
+        st.markdown(f"<ul>{_insight_list(combined_risks)}</ul>", unsafe_allow_html=True)
     with c3:
         st.markdown("##### Muscle Volume")
         st.markdown(f"<ul>{_insight_list(muscle_group_volume)}</ul>", unsafe_allow_html=True)
@@ -406,6 +412,14 @@ def render_weekly_insights(df: pd.DataFrame) -> None:
         st.metric("Pull", f"{balance['pull']:.0f}%")
         st.metric("Legs", f"{balance['legs']:.0f}%")
         st.caption(balance_summary)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("##### Undertrained")
+        st.markdown(f"<ul>{_insight_list(undertrained)}</ul>", unsafe_allow_html=True)
+    with c2:
+        st.markdown("##### Recommendations")
+        st.markdown(f"<ul>{_insight_list(recommendations)}</ul>", unsafe_allow_html=True)
 
 
 def render_dashboard(df: pd.DataFrame) -> None:
