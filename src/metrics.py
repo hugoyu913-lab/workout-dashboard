@@ -3,10 +3,111 @@ from __future__ import annotations
 import pandas as pd
 
 
+CHECKIN_COLUMNS = [
+    "Date",
+    "Bodyweight",
+    "Waist",
+    "Calories",
+    "Protein",
+    "SleepHours",
+    "Energy",
+    "Soreness",
+    "Stress",
+]
+
+
 def weekly_total_volume(df: pd.DataFrame) -> pd.DataFrame:
     dated = df.dropna(subset=["Date"]).copy()
     dated["Week"] = dated["Date"].dt.to_period("W").dt.start_time
     return dated.groupby("Week", as_index=False)["Volume"].sum().sort_values("Week")
+
+
+def clean_checkins(raw: pd.DataFrame) -> pd.DataFrame:
+    if raw.empty:
+        return pd.DataFrame(columns=CHECKIN_COLUMNS)
+
+    df = raw.copy()
+    df.columns = [str(column).strip() for column in df.columns]
+    for column in CHECKIN_COLUMNS:
+        if column not in df.columns:
+            df[column] = pd.NA
+
+    df = df[CHECKIN_COLUMNS].copy()
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    for column in CHECKIN_COLUMNS:
+        if column != "Date":
+            df[column] = pd.to_numeric(df[column], errors="coerce")
+
+    df = df.dropna(subset=["Date"]).sort_values("Date").reset_index(drop=True)
+    return df
+
+
+def checkin_metrics(checkins: pd.DataFrame) -> dict[str, object]:
+    empty = {
+        "bodyweight_7day_avg": pd.NA,
+        "weekly_weight_loss_rate": pd.NA,
+        "average_protein": pd.NA,
+        "average_sleep": pd.NA,
+        "cut_pace": "unknown",
+        "recovery_summary": "No check-in data available.",
+        "warnings": [],
+    }
+    if checkins.empty:
+        return empty
+
+    df = checkins.sort_values("Date").copy()
+    recent = df.tail(14)
+    bodyweight_7day_avg = df["Bodyweight"].dropna().tail(7).mean()
+    average_protein = recent["Protein"].dropna().mean()
+    average_sleep = recent["SleepHours"].dropna().mean()
+
+    weekly_rate = pd.NA
+    weights = df.dropna(subset=["Bodyweight"])
+    if len(weights) >= 2:
+        current = weights.tail(7)["Bodyweight"].mean()
+        previous = weights.iloc[:-7].tail(7)["Bodyweight"].mean() if len(weights) >= 8 else weights.iloc[0]["Bodyweight"]
+        days = max((weights.iloc[-1]["Date"] - weights.iloc[0]["Date"]).days, 1)
+        if pd.notna(current) and pd.notna(previous):
+            if len(weights) >= 8:
+                weekly_rate = previous - current
+            else:
+                weekly_rate = (weights.iloc[0]["Bodyweight"] - weights.iloc[-1]["Bodyweight"]) / days * 7
+
+    if pd.isna(weekly_rate):
+        cut_pace = "unknown"
+    elif weekly_rate < 0.25:
+        cut_pace = "slow"
+    elif weekly_rate <= 1.25:
+        cut_pace = "ideal"
+    else:
+        cut_pace = "aggressive"
+
+    warnings = []
+    if cut_pace == "aggressive":
+        warnings.append("Bodyweight is dropping quickly; monitor strength retention and recovery.")
+    if pd.notna(average_sleep) and average_sleep < 6.5:
+        warnings.append("Average sleep is below 6.5 hours.")
+    if pd.notna(average_protein) and average_protein < 120:
+        warnings.append("Average protein appears low for muscle retention.")
+
+    recovery_parts = []
+    if pd.notna(average_sleep):
+        recovery_parts.append(f"sleep {average_sleep:.1f}h")
+    for column in ("Energy", "Soreness", "Stress"):
+        value = recent[column].dropna().mean()
+        if pd.notna(value):
+            recovery_parts.append(f"{column.lower()} {value:.1f}/10")
+    recovery_summary = " | ".join(recovery_parts) if recovery_parts else "No recent recovery ratings available."
+
+    return {
+        "bodyweight_7day_avg": bodyweight_7day_avg,
+        "weekly_weight_loss_rate": weekly_rate,
+        "average_protein": average_protein,
+        "average_sleep": average_sleep,
+        "cut_pace": cut_pace,
+        "recovery_summary": recovery_summary,
+        "warnings": warnings,
+    }
 
 
 def volume_by_exercise(df: pd.DataFrame) -> pd.DataFrame:

@@ -8,6 +8,14 @@ Suggested exercises are loaded from `config/exercise_recommendations.csv` and se
 
 The Next Workout Recommendation uses the same local signals to choose a simple Push, Pull, Legs, Upper, or Recovery focus with exercises, sets/reps, and intensity guidance.
 
+An optional Google Sheets tab named `Checkins` can provide bodyweight and recovery tracking. Expected columns:
+
+```text
+Date, Bodyweight, Waist, Calories, Protein, SleepHours, Energy, Soreness, Stress
+```
+
+If the tab is absent or empty, the dashboard shows a friendly message and the workout dashboard still works.
+
 The project also includes Apple Health export parsing. A local `data/export.xml` can be converted into daily CSVs under `data/health/` for correlation analysis with training data.
 
 ## Setup

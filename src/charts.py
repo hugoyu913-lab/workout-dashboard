@@ -113,6 +113,35 @@ def line_weekly_volume(df: pd.DataFrame) -> go.Figure:
     return _apply_theme(fig)
 
 
+def line_bodyweight_trend(df: pd.DataFrame) -> go.Figure:
+    if df.empty or "Bodyweight" not in df.columns:
+        return empty_figure("No bodyweight data")
+    work = df.dropna(subset=["Date", "Bodyweight"]).copy()
+    if work.empty:
+        return empty_figure("No bodyweight data")
+    work = work.sort_values("Date")
+    work["Bodyweight7DayAvg"] = work["Bodyweight"].rolling(7, min_periods=1).mean()
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=work["Date"],
+        y=work["Bodyweight"],
+        mode="markers",
+        marker=dict(color="rgba(96,165,250,0.45)", size=5),
+        name="Daily",
+        hovertemplate="%{x|%Y-%m-%d}<br>Bodyweight: %{y:.1f} lbs<extra></extra>",
+    ))
+    fig.add_trace(go.Scatter(
+        x=work["Date"],
+        y=work["Bodyweight7DayAvg"],
+        mode="lines",
+        line=dict(color=_ACCENT, width=2.5),
+        name="7-day avg",
+        hovertemplate="%{x|%Y-%m-%d}<br>7-day avg: %{y:.1f} lbs<extra></extra>",
+    ))
+    fig.update_layout(yaxis_title="Bodyweight (lbs)", xaxis_title="")
+    return _apply_theme(fig)
+
+
 def line_workout_frequency(df: pd.DataFrame) -> go.Figure:
     if df.empty:
         return empty_figure("No workout frequency data")

@@ -14,6 +14,7 @@ from google.oauth2.service_account import Credentials
 
 DEFAULT_SPREADSHEET_ID = "1-45dvx4NOmyAOg8fDBL4_525NMXhCuEcSk_eaf9v9AI"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+CHECKINS_SHEET_NAME = "checkins"
 
 # Matches "m/d" or "m/d/yy" or "m/d/yyyy" anywhere in a string
 _DATE_RE = re.compile(r"(\d{1,2}/\d{1,2}(?:/\d{2,4})?)")
@@ -182,7 +183,11 @@ def _assign_date_years(df: pd.DataFrame) -> pd.DataFrame:
 def load_all_worksheets(spreadsheet_id: str = DEFAULT_SPREADSHEET_ID) -> pd.DataFrame:
     try:
         spreadsheet = get_client().open_by_key(spreadsheet_id)
-        frames = [worksheet_to_dataframe(sheet) for sheet in spreadsheet.worksheets()]
+        frames = [
+            worksheet_to_dataframe(sheet)
+            for sheet in spreadsheet.worksheets()
+            if sheet.title.strip().lower() != CHECKINS_SHEET_NAME
+        ]
     except gspread.exceptions.APIError as exc:
         raise GoogleSheetsError(f"Google Sheets API error: {exc}") from exc
     except gspread.exceptions.SpreadsheetNotFound as exc:
@@ -197,3 +202,27 @@ def load_all_worksheets(spreadsheet_id: str = DEFAULT_SPREADSHEET_ID) -> pd.Data
 
     combined = pd.concat(usable_frames, ignore_index=True, sort=False)
     return _assign_date_years(combined)
+
+
+def load_checkins_worksheet(spreadsheet_id: str = DEFAULT_SPREADSHEET_ID) -> pd.DataFrame:
+    try:
+        spreadsheet = get_client().open_by_key(spreadsheet_id)
+        worksheet = next(
+            (
+                sheet for sheet in spreadsheet.worksheets()
+                if sheet.title.strip().lower() == CHECKINS_SHEET_NAME
+            ),
+            None,
+        )
+        if worksheet is None:
+            return pd.DataFrame()
+        records = worksheet.get_all_records()
+    except gspread.exceptions.APIError as exc:
+        raise GoogleSheetsError(f"Google Sheets API error: {exc}") from exc
+    except gspread.exceptions.SpreadsheetNotFound as exc:
+        raise GoogleSheetsError(
+            "Spreadsheet was not found. Confirm the ID and share the sheet with "
+            "the service account email."
+        ) from exc
+
+    return pd.DataFrame(records)

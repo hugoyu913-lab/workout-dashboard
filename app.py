@@ -15,6 +15,7 @@ from src.charts import (
     correlation_heatmap,
     dual_axis_line,
     heatmap_weekly_muscle_volume,
+    line_bodyweight_trend,
     line_weekly_volume,
     line_workout_frequency,
     scatter_1rm_timeline,
@@ -24,6 +25,8 @@ from src.charts import (
 from src.cleaner import clean_workout_log
 from src.insights import build_next_workout_recommendation, build_weekly_insights
 from src.metrics import (
+    checkin_metrics,
+    clean_checkins,
     daily_workout_detail,
     daily_workout_metrics,
     daily_workout_summary,
@@ -46,6 +49,7 @@ from src.sheets_client import (
     GoogleSheetsError,
     get_credentials_client_email,
     load_all_worksheets,
+    load_checkins_worksheet,
 )
 
 st.set_page_config(
@@ -319,6 +323,12 @@ def load_data(spreadsheet_id: str) -> pd.DataFrame:
     return clean_workout_log(raw)
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def load_checkins(spreadsheet_id: str) -> pd.DataFrame:
+    raw = load_checkins_worksheet(spreadsheet_id)
+    return clean_checkins(raw)
+
+
 def filter_frame(df: pd.DataFrame) -> pd.DataFrame:
     st.sidebar.markdown("## Filters")
 
@@ -522,7 +532,53 @@ def render_fatigue_risk(df: pd.DataFrame) -> None:
         st.caption(f"Suggested action: {fatigue['suggested_action']}")
 
 
-def render_dashboard(df: pd.DataFrame) -> None:
+def render_bodyweight_recovery(checkins: pd.DataFrame, workout_df: pd.DataFrame) -> None:
+    section_header("Bodyweight & Recovery")
+    if checkins.empty:
+        st.info(
+            "Optional Checkins tab not found or empty. Add a Google Sheet tab named Checkins with "
+            "Date, Bodyweight, Waist, Calories, Protein, SleepHours, Energy, Soreness, Stress."
+        )
+        return
+
+    metrics = checkin_metrics(checkins)
+    retention = strength_retention_score(workout_df)
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric(
+        "7-Day Bodyweight",
+        "0" if pd.isna(metrics["bodyweight_7day_avg"]) else f"{metrics['bodyweight_7day_avg']:.1f} lbs",
+    )
+    c2.metric(
+        "Weekly Loss",
+        "0" if pd.isna(metrics["weekly_weight_loss_rate"]) else f"{metrics['weekly_weight_loss_rate']:.1f} lbs/wk",
+    )
+    c3.metric(
+        "Protein",
+        "0" if pd.isna(metrics["average_protein"]) else f"{metrics['average_protein']:.0f} g",
+    )
+    c4.metric(
+        "Sleep",
+        "0" if pd.isna(metrics["average_sleep"]) else f"{metrics['average_sleep']:.1f} h",
+    )
+
+    left, right = st.columns([2, 1])
+    with left:
+        st.plotly_chart(line_bodyweight_trend(checkins), use_container_width=True)
+    with right:
+        st.markdown("##### Recovery Summary")
+        st.caption(f"Cut pace: {str(metrics['cut_pace']).title()}")
+        st.caption(str(metrics["recovery_summary"]))
+        warnings = list(metrics["warnings"])
+        if metrics["cut_pace"] == "aggressive" and retention["regressed_pct"] > 0:
+            warnings.append("Weight is dropping fast while strength retention is declining.")
+        if warnings:
+            st.warning(" ".join(warnings))
+        else:
+            st.success("No recovery warnings from check-ins.")
+
+
+def render_dashboard(df: pd.DataFrame, checkins: pd.DataFrame) -> None:
     filtered = filter_frame(df)
 
     total_volume = filtered["Volume"].sum()
@@ -543,6 +599,7 @@ def render_dashboard(df: pd.DataFrame) -> None:
     render_weekly_insights(filtered)
     render_strength_retention(filtered)
     render_fatigue_risk(filtered)
+    render_bodyweight_recovery(checkins, filtered)
 
     section_header("Muscle Group Frequency")
     mg_frequency = muscle_group_frequency(filtered)
@@ -796,10 +853,12 @@ def main() -> None:
 
     if st.sidebar.button("↺  Refresh Data"):
         load_data.clear()
+        load_checkins.clear()
 
     try:
         with st.spinner("Loading workout data..."):
             df = load_data(spreadsheet_id)
+            checkins = load_checkins(spreadsheet_id)
     except GoogleSheetsError as exc:
         st.error(str(exc))
         st.stop()
@@ -812,7 +871,7 @@ def main() -> None:
         st.stop()
 
     if page == "Dashboard":
-        render_dashboard(df)
+        render_dashboard(df, checkins)
     else:
         filtered = filter_frame(df)
         render_correlations(filtered, health_df)

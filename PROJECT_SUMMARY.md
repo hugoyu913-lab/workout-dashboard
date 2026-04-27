@@ -149,6 +149,7 @@ Date, Workout, Exercise, MuscleGroup, Category, Set, Weight, Reps, Volume, Sourc
 - Fatigue Risk Detector that flags same-weight rep drops, repeated regressions in the same muscle group, and weeks above the normal 5-6 training sessions, then returns `Low`, `Moderate`, or `High` risk with reasons and a suggested action.
 - Suggested Exercises module backed by `config/exercise_recommendations.csv`; it recommends 2-3 high-priority movements per affected muscle group for frequency gaps, regressions, and recovery-sensitive substitutions.
 - Next Workout Recommendation module that combines weekly insights, fatigue risk, strength retention, frequency gaps, and suggested exercises to choose a deterministic Push, Pull, Legs, Upper, or Recovery session.
+- Optional `Checkins` Google Sheet tab support for bodyweight and recovery tracking with 7-day bodyweight average, weekly weight-loss rate, average protein, average sleep, cut pace classification, trend chart, and recovery warnings.
 - Muscle group frequency section that counts unique workout dates per muscle group in the active sidebar-filtered date range and displays both a table and bar chart.
 - Daily workout detail section with a workout date selector, daily summary metrics, and an exact per-set table for `Exercise`, `Set`, `Weight`, `Reps`, `Volume`, `MuscleGroup`, `Category`, and `SourceSheet`.
 - Workout comparison section that compares each selected-day exercise against its most recent previous occurrence and flags `Improved`, `Same`, or `Regressed`.
