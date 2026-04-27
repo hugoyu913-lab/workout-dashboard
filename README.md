@@ -4,6 +4,8 @@ Streamlit dashboard backed by a Google Sheets workout log. Reads every worksheet
 
 The optional `Checkins` Google Sheet tab adds bodyweight trend (7-day rolling average), cut-pace classification, recovery signal tracking, and feeds the Cut Guardrails composite risk banner.
 
+The first page is **Coach**, a daily cutting-phase action plan. It combines Apple Health HRV/resting HR, optional Checkins recovery data, weekly muscle frequency, anchor-lift strength retention, and cut pace into a deterministic readiness score, muscle checklist, workout focus, exercise targets, weekly progress tracker, and warning/action cards.
+
 ---
 
 ## Run Locally
@@ -100,7 +102,7 @@ Date | Bodyweight | Waist | Calories | Protein | SleepHours | Energy | Soreness 
 - All numeric except `Date` (any parseable format) and `Deload` (`TRUE`/`FALSE`).
 - `Deload = TRUE` suppresses fatigue and regression warnings for that entire week.
 
-If the tab is absent, the dashboard shows placeholder cards and continues normally.
+If the tab is absent, the dashboard shows placeholder cards and continues normally. The Coach page also continues by falling back to Apple Health HRV/resting heart rate when those CSVs are available, then prompts you to add Checkins for the full readiness score.
 
 ---
 

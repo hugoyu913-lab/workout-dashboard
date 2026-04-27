@@ -35,6 +35,7 @@ workout-dashboard/
     apple_health.py
     charts.py
     cleaner.py
+    coach.py
     insights.py
     metrics.py
     sheets_client.py
@@ -128,6 +129,7 @@ data/health/
 ## Current Working Features
 
 - Google Sheets client with Streamlit secrets support and local service-account JSON fallback.
+- Coach page is the first navigation item. It provides a deterministic daily cutting checklist with readiness scoring, muscle-group frequency cards, a recommended Push/Pull/Legs/Arms/Recovery focus, 2-set exercise targets, weekly progress bars, and warning/action cards.
 - Workbook-wide worksheet loading through `gspread`.
 - Parsing of the current block-header sheet format where each session starts with a row like `Workout Date | Weight | Reps`.
 - Bare `m/d` date handling with inferred year rollovers.
@@ -149,7 +151,7 @@ Date, Workout, Exercise, MuscleGroup, Category, Set, Weight, Reps, Volume, Sourc
 - Fatigue Risk Detector that flags same-weight rep drops, repeated regressions in the same muscle group, and weeks above the normal 5-6 training sessions, then returns `Low`, `Moderate`, or `High` risk with reasons and a suggested action.
 - Suggested Exercises module backed by `config/exercise_recommendations.csv`; it recommends 2-3 high-priority movements per affected muscle group for frequency gaps, regressions, and recovery-sensitive substitutions.
 - Next Workout Recommendation module that combines weekly insights, fatigue risk, strength retention, frequency gaps, and suggested exercises to choose a deterministic Push, Pull, Legs, Upper, or Recovery session.
-- Optional `Checkins` Google Sheet tab support for bodyweight and recovery tracking with 7-day bodyweight average, weekly weight-loss rate, average protein, average sleep, cut pace classification, trend chart, and recovery warnings.
+- Optional `Checkins` Google Sheet tab support for bodyweight and recovery tracking with 7-day bodyweight average, weekly weight-loss rate, average protein, average sleep, cut pace classification, trend chart, Coach readiness inputs, and recovery warnings.
 - Muscle group frequency section that counts unique workout dates per muscle group in the active sidebar-filtered date range and displays both a table and bar chart.
 - Daily workout detail section with a workout date selector, daily summary metrics, and an exact per-set table for `Exercise`, `Set`, `Weight`, `Reps`, `Volume`, `MuscleGroup`, `Category`, and `SourceSheet`.
 - Workout comparison section that compares each selected-day exercise against its most recent previous occurrence and flags `Improved`, `Same`, or `Regressed`.
@@ -160,7 +162,6 @@ Date, Workout, Exercise, MuscleGroup, Category, Set, Weight, Reps, Volume, Sourc
 
 ## Known Issues Or Limitations
 
-- `app.py` imports `render_uploader` from `src.apple_health`, but `src/apple_health.py` currently defines `render_sidebar_widget()` instead. As written, this will cause an import error before the app can start.
 - `app.py` expects health dataframe columns such as `resting_hr`, `active_calories`, `hrv`, and `calories_in`, while `src/apple_health.py` writes columns such as `resting_hr_bpm`, `active_calories_kcal`, `hrv_ms`, and `calories_kcal`. The correlation page needs column-name alignment after the import issue is fixed.
 - `README.md` previously documented only `config/credentials.json`, but the current local key is `credentials.json`. Both are supported by the app.
 - `config/exercise_map.csv` now drives exercise standardization, muscle groups, and categories, but unmapped exercises still depend on the built-in fallback map or become `other`.

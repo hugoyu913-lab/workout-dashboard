@@ -25,6 +25,7 @@ from src.charts import (
     scatter_with_r2,
 )
 from src.cleaner import clean_workout_log
+from src.coach import render_coach_page
 from src.fatigue import fatigue_risk_detector
 from src.guardrails import compute_guardrails
 from src.insights import build_next_workout_recommendation, build_weekly_insights
@@ -1112,7 +1113,7 @@ def main() -> None:
     )
 
     st.sidebar.markdown("## Navigation")
-    page = st.sidebar.radio("", ["Dashboard", "Grades", "Correlations"], label_visibility="collapsed")
+    page = st.sidebar.radio("", ["Coach", "Dashboard", "Grades", "Correlations"], label_visibility="collapsed")
     st.sidebar.markdown("<div style='height:0.25rem'></div>", unsafe_allow_html=True)
 
     health_df = health_uploader()
@@ -1144,7 +1145,9 @@ def main() -> None:
         st.warning("No usable workout rows were found after cleaning.")
         st.stop()
 
-    if page == "Dashboard":
+    if page == "Coach":
+        render_coach_page(df, checkins, health_df)
+    elif page == "Dashboard":
         render_dashboard(df, checkins)
     elif page == "Grades":
         render_grades_page(df, checkins)
