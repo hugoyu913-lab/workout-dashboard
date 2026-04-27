@@ -498,6 +498,31 @@ def dual_axis_line(
     return _apply_theme(fig)
 
 
+def line_session_quality(df: pd.DataFrame) -> go.Figure:
+    if df.empty or "QualityScore" not in df.columns:
+        return empty_figure("No session quality data yet")
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df["Date"],
+        y=df["QualityScore"],
+        mode="lines+markers",
+        line=dict(color="#4ade80", width=2.5),
+        marker=dict(color="#4ade80", size=5, line=dict(color="#0d0d0f", width=1.5)),
+        fill="tozeroy",
+        fillcolor="rgba(74,222,128,0.07)",
+        hovertemplate="<b>%{x|%Y-%m-%d}</b><br>Quality: %{y:.1f}/100<extra></extra>",
+        name="Session Quality",
+    ))
+    fig.add_hline(
+        y=70,
+        line=dict(color="rgba(232,137,12,0.35)", width=1, dash="dot"),
+        annotation_text="70",
+        annotation_font=dict(color="#444450", size=10, family=_FONT),
+    )
+    fig.update_layout(yaxis_range=[0, 100], yaxis_title="Quality Score (0-100)", xaxis_title="")
+    return _apply_theme(fig)
+
+
 def correlation_heatmap(corr_matrix: pd.DataFrame, title: str = "Correlation Matrix") -> go.Figure:
     """Styled heatmap of a correlation matrix."""
     if corr_matrix.empty:

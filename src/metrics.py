@@ -2,6 +2,12 @@ from __future__ import annotations
 
 import pandas as pd
 
+from config.profile import TARGET_REPS_MIN, TARGET_REPS_MAX, TARGET_SETS
+
+# Re-export from dedicated modules so existing callers keep working
+from src.fatigue import fatigue_risk_detector  # noqa: F401
+from src.retention import strength_retention_score  # noqa: F401
+
 
 CHECKIN_COLUMNS = [
     "Date",
@@ -13,6 +19,7 @@ CHECKIN_COLUMNS = [
     "Energy",
     "Soreness",
     "Stress",
+    "Deload",
 ]
 
 
@@ -27,23 +34,40 @@ def clean_checkins(raw: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=CHECKIN_COLUMNS)
 
     df = raw.copy()
-    df.columns = [str(column).strip() for column in df.columns]
-    for column in CHECKIN_COLUMNS:
-        if column not in df.columns:
-            df[column] = pd.NA
+    df.columns = [str(c).strip() for c in df.columns]
+    for col in CHECKIN_COLUMNS:
+        if col not in df.columns:
+            df[col] = pd.NA
 
     df = df[CHECKIN_COLUMNS].copy()
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-    for column in CHECKIN_COLUMNS:
-        if column != "Date":
-            df[column] = pd.to_numeric(df[column], errors="coerce")
+
+    numeric_cols = [c for c in CHECKIN_COLUMNS if c not in ("Date", "Deload")]
+    for col in numeric_cols:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Parse Deload as boolean: TRUE / 1 / yes → True, everything else → False
+    df["Deload"] = (
+        df["Deload"]
+        .astype(str)
+        .str.strip()
+        .str.lower()
+        .isin({"true", "1", "yes"})
+    )
 
     df = df.dropna(subset=["Date"]).sort_values("Date").reset_index(drop=True)
     return df
 
 
+def get_deload_dates(checkins: pd.DataFrame) -> list[pd.Timestamp]:
+    """Return list of dates where Deload=True in the checkins sheet."""
+    if checkins.empty or "Deload" not in checkins.columns or "Date" not in checkins.columns:
+        return []
+    return checkins.loc[checkins["Deload"] == True, "Date"].dropna().tolist()
+
+
 def checkin_metrics(checkins: pd.DataFrame) -> dict[str, object]:
-    empty = {
+    empty: dict[str, object] = {
         "bodyweight_7day_avg": pd.NA,
         "weekly_weight_loss_rate": pd.NA,
         "average_protein": pd.NA,
@@ -57,46 +81,50 @@ def checkin_metrics(checkins: pd.DataFrame) -> dict[str, object]:
 
     df = checkins.sort_values("Date").copy()
     recent = df.tail(14)
-    bodyweight_7day_avg = df["Bodyweight"].dropna().tail(7).mean()
+
+    # 7-day rolling average for bodyweight — used everywhere for cut pace + display
+    bw_rolling = df["Bodyweight"].rolling(7, min_periods=1).mean()
+    bodyweight_7day_avg = bw_rolling.dropna().iloc[-1] if not bw_rolling.dropna().empty else pd.NA
+
     average_protein = recent["Protein"].dropna().mean()
     average_sleep = recent["SleepHours"].dropna().mean()
 
-    weekly_rate = pd.NA
-    weights = df.dropna(subset=["Bodyweight"])
-    if len(weights) >= 2:
-        current = weights.tail(7)["Bodyweight"].mean()
-        previous = weights.iloc[:-7].tail(7)["Bodyweight"].mean() if len(weights) >= 8 else weights.iloc[0]["Bodyweight"]
+    # Cut pace from rolling-average trend, not raw daily spikes
+    weekly_rate: object = pd.NA
+    valid_rolling = bw_rolling.dropna()
+    if len(valid_rolling) >= 8:
+        current_avg = float(valid_rolling.iloc[-1])
+        previous_avg = float(valid_rolling.iloc[-8])
+        weekly_rate = previous_avg - current_avg
+    elif len(df.dropna(subset=["Bodyweight"])) >= 2:
+        weights = df.dropna(subset=["Bodyweight"])
         days = max((weights.iloc[-1]["Date"] - weights.iloc[0]["Date"]).days, 1)
-        if pd.notna(current) and pd.notna(previous):
-            if len(weights) >= 8:
-                weekly_rate = previous - current
-            else:
-                weekly_rate = (weights.iloc[0]["Bodyweight"] - weights.iloc[-1]["Bodyweight"]) / days * 7
+        weekly_rate = (float(weights.iloc[0]["Bodyweight"]) - float(weights.iloc[-1]["Bodyweight"])) / days * 7
 
     if pd.isna(weekly_rate):
         cut_pace = "unknown"
-    elif weekly_rate < 0.25:
+    elif float(weekly_rate) < 0.25:
         cut_pace = "slow"
-    elif weekly_rate <= 1.25:
+    elif float(weekly_rate) <= 1.25:
         cut_pace = "ideal"
     else:
         cut_pace = "aggressive"
 
-    warnings = []
+    warnings: list[str] = []
     if cut_pace == "aggressive":
         warnings.append("Bodyweight is dropping quickly; monitor strength retention and recovery.")
-    if pd.notna(average_sleep) and average_sleep < 6.5:
+    if pd.notna(average_sleep) and float(average_sleep) < 6.5:
         warnings.append("Average sleep is below 6.5 hours.")
-    if pd.notna(average_protein) and average_protein < 120:
+    if pd.notna(average_protein) and float(average_protein) < 120:
         warnings.append("Average protein appears low for muscle retention.")
 
-    recovery_parts = []
+    recovery_parts: list[str] = []
     if pd.notna(average_sleep):
-        recovery_parts.append(f"sleep {average_sleep:.1f}h")
-    for column in ("Energy", "Soreness", "Stress"):
-        value = recent[column].dropna().mean()
-        if pd.notna(value):
-            recovery_parts.append(f"{column.lower()} {value:.1f}/10")
+        recovery_parts.append(f"sleep {float(average_sleep):.1f}h")
+    for col in ("Energy", "Soreness", "Stress"):
+        val = recent[col].dropna().mean()
+        if pd.notna(val):
+            recovery_parts.append(f"{col.lower()} {float(val):.1f}/10")
     recovery_summary = " | ".join(recovery_parts) if recovery_parts else "No recent recovery ratings available."
 
     return {
@@ -121,11 +149,11 @@ def volume_by_exercise(df: pd.DataFrame) -> pd.DataFrame:
         .sort_values("Volume", ascending=False)
         .reset_index(drop=True)
     )
-    drop_columns = [
-        column for column in ("MuscleGroup", "Category")
-        if column in grouped.columns and grouped[column].equals(grouped["Exercise"])
+    drop_cols = [
+        col for col in ("MuscleGroup", "Category")
+        if col in grouped.columns and grouped[col].equals(grouped["Exercise"])
     ]
-    return grouped.drop(columns=drop_columns)
+    return grouped.drop(columns=drop_cols)
 
 
 def estimated_1rm_by_exercise(df: pd.DataFrame) -> pd.DataFrame:
@@ -141,7 +169,6 @@ def estimated_1rm_by_exercise(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def estimated_1rm_over_time(df: pd.DataFrame, exercise: str) -> pd.DataFrame:
-    """Daily best estimated 1RM for one exercise, with PR flag."""
     work = df[(df["Exercise"] == exercise)].dropna(subset=["Weight", "Reps", "Date"]).copy()
     if work.empty:
         return pd.DataFrame(columns=["Date", "Estimated1RM", "IsPR"])
@@ -152,7 +179,6 @@ def estimated_1rm_over_time(df: pd.DataFrame, exercise: str) -> pd.DataFrame:
         .sort_values("Date")
         .reset_index(drop=True)
     )
-    # A day is a PR if its 1RM exceeds all previous days' 1RMs
     prev_best = daily["Estimated1RM"].shift(1).expanding(min_periods=1).max()
     daily["IsPR"] = daily["Estimated1RM"] > prev_best.fillna(-1)
     return daily
@@ -161,22 +187,18 @@ def estimated_1rm_over_time(df: pd.DataFrame, exercise: str) -> pd.DataFrame:
 def pr_tracker(df: pd.DataFrame) -> pd.DataFrame:
     work = df.dropna(subset=["Exercise"]).copy()
     work["Estimated1RM"] = work["Weight"] * (1 + work["Reps"] / 30)
-
     max_weight = work.sort_values(["Exercise", "Weight"], ascending=[True, False]).groupby("Exercise").first()
     max_reps = work.sort_values(["Exercise", "Reps"], ascending=[True, False]).groupby("Exercise").first()
     max_e1rm = work.sort_values(["Exercise", "Estimated1RM"], ascending=[True, False]).groupby("Exercise").first()
-
     records = []
     for exercise in sorted(work["Exercise"].dropna().unique()):
-        records.append(
-            {
-                "Exercise": exercise,
-                "MaxWeight": max_weight.loc[exercise, "Weight"] if exercise in max_weight.index else pd.NA,
-                "MaxReps": max_reps.loc[exercise, "Reps"] if exercise in max_reps.index else pd.NA,
-                "BestEstimated1RM": max_e1rm.loc[exercise, "Estimated1RM"] if exercise in max_e1rm.index else pd.NA,
-                "BestDate": max_e1rm.loc[exercise, "Date"] if exercise in max_e1rm.index else pd.NaT,
-            }
-        )
+        records.append({
+            "Exercise": exercise,
+            "MaxWeight": max_weight.loc[exercise, "Weight"] if exercise in max_weight.index else pd.NA,
+            "MaxReps": max_reps.loc[exercise, "Reps"] if exercise in max_reps.index else pd.NA,
+            "BestEstimated1RM": max_e1rm.loc[exercise, "Estimated1RM"] if exercise in max_e1rm.index else pd.NA,
+            "BestDate": max_e1rm.loc[exercise, "Date"] if exercise in max_e1rm.index else pd.NaT,
+        })
     return pd.DataFrame(records).sort_values("BestEstimated1RM", ascending=False, na_position="last")
 
 
@@ -206,7 +228,6 @@ def muscle_group_volume(df: pd.DataFrame) -> pd.DataFrame:
 def muscle_group_frequency(df: pd.DataFrame) -> pd.DataFrame:
     if "MuscleGroup" not in df.columns:
         return pd.DataFrame(columns=["MuscleGroup", "Sessions Trained"])
-
     work = df.dropna(subset=["Date", "MuscleGroup"]).copy()
     work["MuscleGroup"] = work["MuscleGroup"].astype(str).str.strip()
     work = work[
@@ -216,7 +237,6 @@ def muscle_group_frequency(df: pd.DataFrame) -> pd.DataFrame:
     ]
     if work.empty:
         return pd.DataFrame(columns=["MuscleGroup", "Sessions Trained"])
-
     return (
         work.groupby("MuscleGroup", as_index=False)["Date"]
         .nunique()
@@ -258,26 +278,22 @@ def daily_workout_detail(df: pd.DataFrame, selected_date: object) -> pd.DataFram
     columns = ["Exercise", "Set", "Weight", "Reps", "Volume", "MuscleGroup", "Category", "SourceSheet"]
     if df.empty or "Date" not in df.columns:
         return pd.DataFrame(columns=columns)
-
     target_date = pd.to_datetime(selected_date, errors="coerce")
     if pd.isna(target_date):
         return pd.DataFrame(columns=columns)
-
     dated = df.copy()
     dated["Date"] = pd.to_datetime(dated["Date"], errors="coerce")
     work = dated[dated["Date"].dt.date == target_date.date()].copy()
     if work.empty:
         return pd.DataFrame(columns=columns)
-
     order_candidates = ["WorkoutOrder", "ExerciseOrder", "Order", "RowOrder"]
-    order_columns = [column for column in order_candidates if column in work.columns]
-    sort_columns = order_columns or [column for column in ["SourceSheet", "Exercise", "Set"] if column in work.columns]
-    if sort_columns:
-        work = work.sort_values(sort_columns, na_position="last")
-
-    for column in columns:
-        if column not in work.columns:
-            work[column] = pd.NA
+    order_cols = [c for c in order_candidates if c in work.columns]
+    sort_cols = order_cols or [c for c in ["SourceSheet", "Exercise", "Set"] if c in work.columns]
+    if sort_cols:
+        work = work.sort_values(sort_cols, na_position="last")
+    for col in columns:
+        if col not in work.columns:
+            work[col] = pd.NA
     return work[columns].reset_index(drop=True)
 
 
@@ -289,18 +305,13 @@ def daily_workout_summary(detail: pd.DataFrame) -> dict[str, object]:
             "total_volume": 0.0,
             "muscle_groups_trained": "None",
         }
-
     muscle_groups = (
-        detail["MuscleGroup"]
-        .dropna()
-        .astype(str)
-        .str.strip()
+        detail["MuscleGroup"].dropna().astype(str).str.strip()
     )
     muscle_groups = sorted(
-        group for group in muscle_groups.unique()
-        if group and group.lower() not in {"unknown", "other"}
+        g for g in muscle_groups.unique()
+        if g and g.lower() not in {"unknown", "other"}
     )
-
     return {
         "total_exercises": int(detail["Exercise"].dropna().nunique()),
         "total_working_sets": int(detail["Set"].notna().sum()),
@@ -311,29 +322,21 @@ def daily_workout_summary(detail: pd.DataFrame) -> dict[str, object]:
 
 def workout_comparison(df: pd.DataFrame, selected_date: object) -> pd.DataFrame:
     columns = [
-        "Exercise",
-        "Current Weight",
-        "Current Reps",
-        "Previous Weight",
-        "Previous Reps",
-        "Weight Change",
-        "Rep Change",
-        "Status",
+        "Exercise", "Current Weight", "Current Reps",
+        "Previous Weight", "Previous Reps",
+        "Weight Change", "Rep Change", "Status",
     ]
     if df.empty or "Date" not in df.columns or "Exercise" not in df.columns:
         return pd.DataFrame(columns=columns)
-
     target_date = pd.to_datetime(selected_date, errors="coerce")
     if pd.isna(target_date):
         return pd.DataFrame(columns=columns)
-
     work = df.copy()
     work["Date"] = pd.to_datetime(work["Date"], errors="coerce")
     work = work.dropna(subset=["Date", "Exercise"])
     current = work[work["Date"].dt.date == target_date.date()].copy()
     if current.empty:
         return pd.DataFrame(columns=columns)
-
     records = []
     for exercise, current_group in current.groupby("Exercise", sort=False):
         current_best = (
@@ -341,243 +344,150 @@ def workout_comparison(df: pd.DataFrame, selected_date: object) -> pd.DataFrame:
             .iloc[0]
         )
         previous_rows = work[
-            (work["Exercise"] == exercise)
-            & (work["Date"].dt.date < target_date.date())
+            (work["Exercise"] == exercise) & (work["Date"].dt.date < target_date.date())
         ].copy()
         if previous_rows.empty:
-            previous_weight = pd.NA
-            previous_reps = pd.NA
-            weight_change = pd.NA
-            rep_change = pd.NA
-            status = "No Previous"
-        else:
-            previous_date = previous_rows["Date"].max().date()
-            previous_group = previous_rows[previous_rows["Date"].dt.date == previous_date]
-            previous_best = (
-                previous_group.sort_values(["Weight", "Reps"], ascending=[False, False], na_position="last")
-                .iloc[0]
-            )
-            previous_weight = previous_best["Weight"]
-            previous_reps = previous_best["Reps"]
-            weight_change = current_best["Weight"] - previous_weight
-            rep_change = current_best["Reps"] - previous_reps
-
-            improved = (
-                pd.notna(weight_change)
-                and weight_change > 0
-            ) or (
-                pd.notna(rep_change)
-                and rep_change > 0
-            )
-            regressed = (
-                pd.notna(weight_change)
-                and weight_change < 0
-            ) or (
-                pd.notna(rep_change)
-                and rep_change < 0
-            )
-            if improved:
-                status = "Improved"
-            elif regressed:
-                status = "Regressed"
-            else:
-                status = "Same"
-
-        records.append(
-            {
+            records.append({
                 "Exercise": exercise,
                 "Current Weight": current_best["Weight"],
                 "Current Reps": current_best["Reps"],
-                "Previous Weight": previous_weight,
-                "Previous Reps": previous_reps,
-                "Weight Change": weight_change,
-                "Rep Change": rep_change,
-                "Status": status,
-            }
+                "Previous Weight": pd.NA,
+                "Previous Reps": pd.NA,
+                "Weight Change": pd.NA,
+                "Rep Change": pd.NA,
+                "Status": "No Previous",
+            })
+            continue
+        prev_date = previous_rows["Date"].max().date()
+        prev_group = previous_rows[previous_rows["Date"].dt.date == prev_date]
+        prev_best = (
+            prev_group.sort_values(["Weight", "Reps"], ascending=[False, False], na_position="last")
+            .iloc[0]
         )
-
+        weight_change = current_best["Weight"] - prev_best["Weight"]
+        rep_change = current_best["Reps"] - prev_best["Reps"]
+        improved = (pd.notna(weight_change) and weight_change > 0) or (pd.notna(rep_change) and rep_change > 0)
+        regressed = (pd.notna(weight_change) and weight_change < 0) or (pd.notna(rep_change) and rep_change < 0)
+        status = "Improved" if improved else ("Regressed" if regressed else "Same")
+        records.append({
+            "Exercise": exercise,
+            "Current Weight": current_best["Weight"],
+            "Current Reps": current_best["Reps"],
+            "Previous Weight": prev_best["Weight"],
+            "Previous Reps": prev_best["Reps"],
+            "Weight Change": weight_change,
+            "Rep Change": rep_change,
+            "Status": status,
+        })
     return pd.DataFrame(records, columns=columns)
 
 
-def strength_retention_score(df: pd.DataFrame, weeks: int = 3) -> dict[str, object]:
-    empty = {
-        "score": 0,
-        "improved_pct": 0.0,
-        "maintained_pct": 0.0,
-        "regressed_pct": 0.0,
-        "interpretation": "Not enough recent strength data to score retention.",
-        "exercise_count": 0,
-    }
+def session_quality_score(df: pd.DataFrame) -> pd.DataFrame:
+    """0-100 quality score per session over the last 30 sessions.
+
+    Components:
+      40% — % exercises improved-or-maintained vs their previous occurrence
+      30% — % reps in TARGET_REPS_MIN..TARGET_REPS_MAX range
+      30% — session volume relative to personal average (capped at 100)
+    """
+    empty = pd.DataFrame(columns=["Date", "QualityScore"])
     if df.empty or "Date" not in df.columns or "Exercise" not in df.columns:
         return empty
 
-    work = df.dropna(subset=["Date", "Exercise", "Weight", "Reps"]).copy()
-    if work.empty:
-        return empty
-
+    work = df.dropna(subset=["Date", "Exercise"]).copy()
     work["Date"] = pd.to_datetime(work["Date"], errors="coerce")
     work = work.dropna(subset=["Date"])
     if work.empty:
         return empty
 
-    latest_date = work["Date"].max()
-    cutoff = latest_date - pd.Timedelta(weeks=weeks)
-    recent = work[work["Date"] >= cutoff].copy()
-    if recent.empty:
+    work["Estimated1RM"] = work["Weight"] * (1 + work["Reps"] / 30)
+
+    session_dates = sorted(work["Date"].dt.date.unique())
+    if len(session_dates) < 2:
         return empty
 
-    recent["Estimated1RM"] = recent["Weight"] * (1 + recent["Reps"] / 30)
-    statuses = []
-    for exercise, group in recent.groupby("Exercise"):
-        ordered = group.sort_values("Date")
-        dates = ordered["Date"].dt.date.unique()
-        if len(dates) < 2:
-            continue
+    avg_volume = float(work.groupby(work["Date"].dt.date)["Volume"].sum().mean())
+    recent_dates = session_dates[-30:]
 
-        latest_ex_date = ordered["Date"].max().date()
-        current = ordered[ordered["Date"].dt.date == latest_ex_date]
-        previous = ordered[ordered["Date"].dt.date < latest_ex_date]
-        if previous.empty:
-            continue
+    records: list[dict[str, object]] = []
+    for session_date in recent_dates:
+        session = work[work["Date"].dt.date == session_date]
 
-        current_best = current["Estimated1RM"].max()
-        previous_best = previous["Estimated1RM"].max()
-        if pd.isna(current_best) or pd.isna(previous_best) or previous_best <= 0:
-            continue
+        # --- improvement component ---
+        improved_or_maintained = 0
+        total_comparable = 0
+        for exercise in session["Exercise"].unique():
+            prev_data = work[
+                (work["Exercise"] == exercise)
+                & (work["Date"].dt.date < session_date)
+            ]
+            if prev_data.empty:
+                continue
+            prev_best = prev_data["Estimated1RM"].max()
+            curr_best = session[session["Exercise"] == exercise]["Estimated1RM"].max()
+            if pd.isna(prev_best) or pd.isna(curr_best) or prev_best <= 0:
+                continue
+            total_comparable += 1
+            if curr_best / prev_best >= 0.98:
+                improved_or_maintained += 1
+        improvement_score = (improved_or_maintained / total_comparable * 100) if total_comparable > 0 else 50.0
 
-        ratio = current_best / previous_best
-        if ratio > 1.005:
-            statuses.append("Improved")
-        elif ratio < 0.98:
-            statuses.append("Regressed")
+        # --- rep adherence component ---
+        reps = session["Reps"].dropna()
+        if not reps.empty:
+            in_range = ((reps >= TARGET_REPS_MIN) & (reps <= TARGET_REPS_MAX)).sum()
+            rep_score = float(in_range) / len(reps) * 100
         else:
-            statuses.append("Maintained")
+            rep_score = 50.0
 
-    total = len(statuses)
-    if total == 0:
-        return empty
+        # --- volume component ---
+        session_vol = float(session["Volume"].sum())
+        volume_score = min(100.0, session_vol / avg_volume * 100) if avg_volume > 0 else 50.0
 
-    improved = statuses.count("Improved")
-    maintained = statuses.count("Maintained")
-    regressed = statuses.count("Regressed")
-    improved_pct = improved / total * 100
-    maintained_pct = maintained / total * 100
-    regressed_pct = regressed / total * 100
-    score = round((improved * 1.0 + maintained * 0.7) / total * 100)
+        quality = improvement_score * 0.4 + rep_score * 0.3 + volume_score * 0.3
+        records.append({"Date": pd.Timestamp(session_date), "QualityScore": round(quality, 1)})
 
-    if score >= 85:
-        interpretation = "Strength retention is excellent for a cut."
-    elif score >= 70:
-        interpretation = "Strength is mostly maintained; monitor any regressions."
-    elif score >= 50:
-        interpretation = "Strength retention is mixed; recovery or effort may need adjustment."
-    else:
-        interpretation = "Strength retention is poor; reduce fatigue and prioritize key lifts."
-
-    return {
-        "score": score,
-        "improved_pct": improved_pct,
-        "maintained_pct": maintained_pct,
-        "regressed_pct": regressed_pct,
-        "interpretation": interpretation,
-        "exercise_count": total,
-    }
+    return pd.DataFrame(records)
 
 
-def fatigue_risk_detector(df: pd.DataFrame, weeks: int = 3) -> dict[str, object]:
-    empty = {
-        "risk": "Low",
-        "reasons": ["No repeat-performance fatigue signals detected."],
-        "suggested_action": "Maintain current loads and recovery habits.",
-    }
-    if df.empty or "Date" not in df.columns or "Exercise" not in df.columns:
-        return empty
+def minimum_effective_volume(df: pd.DataFrame) -> list[str]:
+    """Flag muscle groups below TARGET_SETS sets in the most recent week."""
+    if df.empty or "MuscleGroup" not in df.columns or "Date" not in df.columns:
+        return []
 
-    work = df.dropna(subset=["Date", "Exercise", "Weight", "Reps"]).copy()
-    if work.empty:
-        return empty
-
+    work = df.dropna(subset=["Date", "MuscleGroup"]).copy()
     work["Date"] = pd.to_datetime(work["Date"], errors="coerce")
     work = work.dropna(subset=["Date"])
+    work["Week"] = work["Date"].dt.to_period("W").dt.start_time
+
     if work.empty:
-        return empty
+        return []
 
-    latest_date = work["Date"].max()
-    cutoff = latest_date - pd.Timedelta(weeks=weeks)
-    recent = work[work["Date"] >= cutoff].copy()
-    if recent.empty:
-        return empty
+    latest_week = work["Week"].max()
+    latest = work[work["Week"] == latest_week].copy()
+    latest = latest[~latest["MuscleGroup"].str.lower().isin({"unknown", "other", ""})]
 
-    session_best = (
-        recent.groupby(["Date", "Exercise"], as_index=False)
-        .agg(
-            Weight=("Weight", "max"),
-            Reps=("Reps", "max"),
-            MuscleGroup=("MuscleGroup", "first") if "MuscleGroup" in recent.columns else ("Exercise", "first"),
-        )
-        .sort_values(["Exercise", "Date"])
+    if latest.empty:
+        return []
+
+    mg_sets = (
+        latest.groupby("MuscleGroup", as_index=False)
+        .size()
+        .rename(columns={"size": "SetCount"})
     )
 
-    same_weight_rep_drops: list[str] = []
-    regression_groups: dict[str, int] = {}
-    for exercise, group in session_best.groupby("Exercise"):
-        ordered = group.sort_values("Date").reset_index(drop=True)
-        if len(ordered) < 2:
-            continue
-        for idx in range(1, len(ordered)):
-            previous = ordered.iloc[idx - 1]
-            current = ordered.iloc[idx]
-            if (
-                pd.notna(previous["Weight"])
-                and pd.notna(current["Weight"])
-                and pd.notna(previous["Reps"])
-                and pd.notna(current["Reps"])
-                and abs(float(current["Weight"]) - float(previous["Weight"])) < 0.01
-                and float(current["Reps"]) < float(previous["Reps"])
-            ):
-                same_weight_rep_drops.append(
-                    f"{exercise}: reps dropped from {previous['Reps']:.0f} to {current['Reps']:.0f} at {current['Weight']:.0f} lbs."
-                )
-                muscle_group = str(current.get("MuscleGroup", "unknown")).strip().lower() or "unknown"
-                regression_groups[muscle_group] = regression_groups.get(muscle_group, 0) + 1
-
-    reasons: list[str] = []
-    if same_weight_rep_drops:
-        reasons.extend(same_weight_rep_drops[:3])
-
-    clustered_groups = [
-        group for group, count in sorted(regression_groups.items())
-        if count >= 2 and group not in {"unknown", "other"}
-    ]
-    for group in clustered_groups:
-        reasons.append(f"{group.title()} has {regression_groups[group]} same-load rep regressions in the recent window.")
-
-    weekly_sessions = workout_frequency(recent)
-    high_frequency_weeks = weekly_sessions[weekly_sessions["Workouts"] > 6] if not weekly_sessions.empty else pd.DataFrame()
-    if not high_frequency_weeks.empty:
-        max_sessions = int(high_frequency_weeks["Workouts"].max())
-        reasons.append(f"Weekly training frequency reached {max_sessions} sessions, above the normal 5-6 target.")
-
-    risk_points = len(same_weight_rep_drops) + len(clustered_groups) * 2 + len(high_frequency_weeks)
-    if risk_points >= 4:
-        risk = "High"
-        suggested_action = "Reduce fatigue: add recovery, increase RIR by 1-2, or trim intensity for regressing muscle groups."
-    elif risk_points >= 2:
-        risk = "Moderate"
-        suggested_action = "Monitor recovery and avoid pushing load on exercises with same-weight rep drops."
-    else:
-        risk = "Low"
-        suggested_action = "Maintain current recovery habits and keep loads stable."
-
-    return {
-        "risk": risk,
-        "reasons": reasons or empty["reasons"],
-        "suggested_action": suggested_action,
-    }
+    week_str = latest_week.strftime("%b %d") if hasattr(latest_week, "strftime") else str(latest_week)
+    warnings: list[str] = []
+    for _, row in mg_sets.iterrows():
+        if int(row["SetCount"]) < TARGET_SETS:
+            warnings.append(
+                f"{row['MuscleGroup'].title()}: only {row['SetCount']} set(s) this week "
+                f"(MEV = {TARGET_SETS} sets) — week of {week_str}."
+            )
+    return warnings
 
 
 def daily_workout_metrics(df: pd.DataFrame) -> pd.DataFrame:
-    """One row per calendar day: total volume, best e1RM, set count."""
     work = df.dropna(subset=["Date"]).copy()
     work["Estimated1RM"] = work["Weight"] * (1 + work["Reps"] / 30)
     agg = work.groupby("Date", as_index=False).agg(

@@ -1,110 +1,135 @@
 # Workout Analytics Dashboard
 
-Streamlit dashboard for a Google Sheets workout log. It pulls every worksheet in the workbook, parses the current block-style workout format, cleans the rows, and reports volume, estimated 1RM, PRs, workout frequency, top exercises, and muscle group trends.
+Streamlit dashboard backed by a Google Sheets workout log. Reads every worksheet, parses the block-style session format, and reports volume, estimated 1RM, PRs, frequency, muscle-group trends, fatigue risk, strength retention, session quality, cut guardrails, and next-workout recommendations — all locally, no AI API calls.
 
-The dashboard includes a local rule-based weekly insight panel tuned for high-intensity cutting: exercise progression scores, progressing/stalled/declining status flags, muscle-group frequency gaps, fatigue/regression warnings, weekly training score, push/pull/legs balance, and next-week focus suggestions. It also includes a Strength Retention Score and Fatigue Risk Detector for the last 2-3 weeks, muscle group frequency by selected date range, a daily workout detail view, and a workout comparison table for checking each exercise against its most recent previous occurrence. It does not call an AI/API service.
+The optional `Checkins` Google Sheet tab adds bodyweight trend (7-day rolling average), cut-pace classification, recovery signal tracking, and feeds the Cut Guardrails composite risk banner.
 
-Suggested exercises are loaded from `config/exercise_recommendations.csv` and selected deterministically from frequency gaps, regressions, and recovery-sensitive situations.
+---
 
-The Next Workout Recommendation uses the same local signals to choose a simple Push, Pull, Legs, Upper, or Recovery focus with exercises, sets/reps, and intensity guidance.
+## Run Locally
 
-An optional Google Sheets tab named `Checkins` can provide bodyweight and recovery tracking. Expected columns:
-
-```text
-Date, Bodyweight, Waist, Calories, Protein, SleepHours, Energy, Soreness, Stress
-```
-
-If the tab is absent or empty, the dashboard shows a friendly message and the workout dashboard still works.
-
-The project also includes Apple Health export parsing. A local `data/export.xml` can be converted into daily CSVs under `data/health/` for correlation analysis with training data.
-
-## Setup
-
-1. Install dependencies:
-
-```powershell
+```bash
 pip install -r requirements.txt
+streamlit run app.py
 ```
 
-2. Enable the Google Sheets API in Google Cloud.
-3. Create a service account and download its JSON key.
-4. Place the key at `config/credentials.json` or `credentials.json`.
-5. Share the spreadsheet with the service account email using Viewer access.
+Place your service-account key at `config/credentials.json` (or the legacy `credentials.json`), then share the spreadsheet with the service-account email using Viewer access.
 
-The default spreadsheet ID is:
+Override the spreadsheet ID with the sidebar input or:
 
-```text
-1-45dvx4NOmyAOg8fDBL4_525NMXhCuEcSk_eaf9v9AI
+```bash
+export WORKOUT_SPREADSHEET_ID="your-spreadsheet-id"   # macOS/Linux
+$env:WORKOUT_SPREADSHEET_ID="your-spreadsheet-id"     # PowerShell
 ```
 
-The active local service account email is:
+---
 
-```text
-workout-dashboard@workout-dashboard-494506.iam.gserviceaccount.com
+## Deploy to Streamlit Cloud
+
+### 1 — Push this repo to GitHub
+
+```bash
+git push origin main
 ```
 
-You can override the spreadsheet ID with the sidebar field or an environment variable:
+### 2 — Create the app on streamlit.io
 
-```powershell
-$env:WORKOUT_SPREADSHEET_ID="your-spreadsheet-id"
-```
+1. Go to **https://share.streamlit.io** and sign in.
+2. Click **New app**.
+3. Select your GitHub repo, branch `main`, and set **Main file path** to `app.py`.
+4. Click **Deploy**.
 
-## Streamlit Secrets
+### 3 — Add your Google credentials as a secret
 
-For deployment, use Streamlit secrets instead of a local credentials file:
+In the Streamlit Cloud dashboard, open your app → **⋮ (three dots) → Settings → Secrets**.
+
+Paste the following, replacing each value with the fields from your `credentials.json`:
 
 ```toml
 [gcp_service_account]
 type = "service_account"
-project_id = "..."
-private_key_id = "..."
-private_key = "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-client_email = "..."
-client_id = "..."
+project_id = "your-project-id"
+private_key_id = "the-key-id-field"
+private_key = "-----BEGIN PRIVATE KEY-----\nPASTE_YOUR_PRIVATE_KEY_HERE\n-----END PRIVATE KEY-----\n"
+client_email = "your-service-account@your-project.iam.gserviceaccount.com"
+client_id = "the-numeric-client-id"
 auth_uri = "https://accounts.google.com/o/oauth2/auth"
 token_uri = "https://oauth2.googleapis.com/token"
 auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
-client_x509_cert_url = "..."
+client_x509_cert_url = "https://www.googleapis.com/robot/v1/metadata/x509/your-service-account%40your-project.iam.gserviceaccount.com"
 ```
 
-Do not commit `config/credentials.json`, `credentials.json`, `.streamlit/secrets.toml`, or private health exports.
+> **Private key formatting:** the `private_key` value must keep the `\n` escape sequences on a single line — do **not** paste literal newlines inside the TOML string. Copy the `private_key` field exactly as it appears in the JSON file (it already contains `\n`).
 
-## Run
+Click **Save**. Streamlit Cloud will restart the app automatically.
 
-```powershell
-streamlit run app.py
+---
+
+## Google Sheets Setup
+
+1. Enable the **Google Sheets API** in your Google Cloud project.
+2. Create a **Service Account**, then generate a JSON key.
+3. **Share** your spreadsheet with the service-account `client_email` (Viewer access is enough).
+
+Default spreadsheet ID (change in the sidebar or via env var):
+
+```
+1-45dvx4NOmyAOg8fDBL4_525NMXhCuEcSk_eaf9v9AI
 ```
 
-Optional Apple Health preprocessing:
+---
 
-```powershell
-python scripts\parse_health.py
+## Auth Lookup Order
+
+The app resolves credentials in this priority:
+
+1. `st.secrets["gcp_service_account"]` — used in production on Streamlit Cloud.
+2. `config/credentials.json` — local development.
+3. `credentials.json` (repo root) — legacy local fallback.
+
+---
+
+## Checkins Tab (optional)
+
+Add a Google Sheet tab named exactly **`Checkins`** with these columns:
+
+```
+Date | Bodyweight | Waist | Calories | Protein | SleepHours | Energy | Soreness | Stress | Deload
 ```
 
-This expects `data/export.xml` and writes daily metric CSVs into `data/health/`.
+- All numeric except `Date` (any parseable format) and `Deload` (`TRUE`/`FALSE`).
+- `Deload = TRUE` suppresses fatigue and regression warnings for that entire week.
 
-## Expected Workout Data
+If the tab is absent, the dashboard shows placeholder cards and continues normally.
 
-The Google Sheets parser expects each workout session to begin with a block header row where columns 2 and 3 are `Weight` and `Reps`. The first column should contain a workout name and date, such as `Upper C 4/21`.
+---
 
-The cleaner standardizes the final dataframe to:
+## Workout Sheet Format
 
-```text
+Each session starts with a block-header row where columns 2 and 3 are `Weight` and `Reps`:
+
+```
+Upper A 4/21  |  Weight  |  Reps
+Bench Press   |  185     |  6
+              |  185     |  6
+              |  185     |  5
+Row           |  135     |  8
+```
+
+The cleaner produces:
+
+```
 Date, Workout, Exercise, MuscleGroup, Category, Set, Weight, Reps, Volume, SourceSheet
 ```
 
-It accepts common aliases such as `movement`, `lift`, `lbs`, `load`, `rep`, and `total volume`. Blank rows are ignored. If an exercise name appears once and following set rows omit it, the dashboard forward-fills the exercise so those rows are counted under the same movement.
+Exercise names are standardised from `config/exercise_map.csv`. Unknown exercises fall back to a built-in map or become `other`.
 
-Exercise names are standardized case-insensitively from `config/exercise_map.csv`, which supports:
+---
 
-```text
-raw_name, standard_name, muscle_group, category
+## Apple Health (optional, local only)
+
+```bash
+python scripts/parse_health.py   # expects data/export.xml
 ```
 
-Older two-column maps with only `raw_name` and `standard_name` still work. Missing muscle groups fall back to the built-in map, and missing categories default to `strength`.
-
-## Current Notes
-
-- Google Sheets auth lookup order is Streamlit secrets, `config/credentials.json`, then `credentials.json`.
-- `PROJECT_SUMMARY.md` contains the full project inventory, current features, known issues, and recommended upgrades.
-- The current app code has an Apple Health integration mismatch: `app.py` imports `render_uploader`, but `src/apple_health.py` currently defines `render_sidebar_widget()`. Fix that before relying on the Correlations page.
+Writes daily CSVs to `data/health/` for correlation charts on the Correlations page. These files are excluded from git.

@@ -1,13 +1,31 @@
-__pycache__/
-.streamlit/secrets.toml
+# Credentials — never commit these
 credentials.json
 config/credentials.json
+.streamlit/secrets.toml
 .env
+
+# Apple Health exports — large private files
+data/export.xml
+data/health/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
 .venv/
 venv/
-credentials.json
-.streamlit/secrets.toml
-__pycache__/
-.venv/
-data/export.xml
-data/health/*.csv
+env/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Editor / tool artifacts
+.idea/
+.vscode/
+*.swp
+.claude/

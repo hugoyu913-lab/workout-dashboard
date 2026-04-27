@@ -16,6 +16,7 @@ from src.charts import (
     dual_axis_line,
     heatmap_weekly_muscle_volume,
     line_bodyweight_trend,
+    line_session_quality,
     line_weekly_volume,
     line_workout_frequency,
     scatter_1rm_timeline,
@@ -23,6 +24,8 @@ from src.charts import (
     scatter_with_r2,
 )
 from src.cleaner import clean_workout_log
+from src.fatigue import fatigue_risk_detector
+from src.guardrails import compute_guardrails
 from src.insights import build_next_workout_recommendation, build_weekly_insights
 from src.metrics import (
     checkin_metrics,
@@ -32,11 +35,12 @@ from src.metrics import (
     daily_workout_summary,
     estimated_1rm_by_exercise,
     estimated_1rm_over_time,
-    fatigue_risk_detector,
+    get_deload_dates,
+    minimum_effective_volume,
     muscle_group_frequency,
     muscle_group_volume,
     pr_tracker,
-    strength_retention_score,
+    session_quality_score,
     top_exercises_by_volume,
     volume_by_exercise,
     weekly_muscle_group_volume,
@@ -44,6 +48,7 @@ from src.metrics import (
     workout_comparison,
     workout_frequency,
 )
+from src.retention import strength_retention_score
 from src.sheets_client import (
     DEFAULT_SPREADSHEET_ID,
     GoogleSheetsError,
@@ -317,6 +322,25 @@ def placeholder_card(metric: str, hint: str = "") -> None:
     st.markdown(_PLACEHOLDER_TMPL.format(metric=metric, hint=hint), unsafe_allow_html=True)
 
 
+_CHECKINS_PLACEHOLDER_TMPL = """
+<div style="
+    background:#111113;border:1px solid #252528;border-left:3px solid #333338;
+    border-radius:3px;padding:1.8rem 1.5rem;text-align:center;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0.6rem;
+">
+  <div style="font-size:1.4rem;opacity:0.15;color:#888890;">◇</div>
+  <div style="font-family:'Bebas Neue',cursive;font-size:0.95rem;
+              letter-spacing:0.14em;color:#555560;">{title}</div>
+  <div style="font-family:'IBM Plex Mono',monospace;font-size:0.62rem;
+              color:#333338;max-width:300px;">{hint}</div>
+</div>
+"""
+
+
+def checkins_placeholder(title: str, hint: str = "") -> None:
+    st.markdown(_CHECKINS_PLACEHOLDER_TMPL.format(title=title, hint=hint), unsafe_allow_html=True)
+
+
 @st.cache_data(ttl=600, show_spinner=False)
 def load_data(spreadsheet_id: str) -> pd.DataFrame:
     raw = load_all_worksheets(spreadsheet_id)
@@ -325,8 +349,11 @@ def load_data(spreadsheet_id: str) -> pd.DataFrame:
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load_checkins(spreadsheet_id: str) -> pd.DataFrame:
-    raw = load_checkins_worksheet(spreadsheet_id)
-    return clean_checkins(raw)
+    try:
+        raw = load_checkins_worksheet(spreadsheet_id)
+        return clean_checkins(raw)
+    except Exception:
+        return pd.DataFrame()
 
 
 def filter_frame(df: pd.DataFrame) -> pd.DataFrame:
@@ -381,10 +408,54 @@ def _insight_list(items: list[str]) -> str:
     return "".join(f"<li>{escape(str(item))}</li>" for item in items)
 
 
+def render_guardrails_banner(df: pd.DataFrame, checkins: pd.DataFrame, deload_dates: list) -> None:
+    try:
+        g = compute_guardrails(df, checkins, deload_dates=deload_dates or None)
+    except Exception:
+        return
+
+    score = g["composite_risk"]
+    level = g["level"]
+    color = g["color"]
+    bg = g["bg"]
+    border = g["border"]
+    action = escape(str(g["action"]))
+    pace_label = escape(str(g["cut_pace"]).title())
+    ret_score = int(g["retention_score"])
+    flags = g["recovery_flags"]
+    flags_str = escape(", ".join(flags)) if flags else "none"
+
+    st.markdown(
+        f"""
+        <div style="background:{bg};border:1px solid {border};border-left:4px solid {color};
+                    border-radius:4px;padding:1rem 1.2rem;margin-bottom:1rem;">
+          <div style="display:flex;align-items:center;gap:0.9rem;flex-wrap:wrap;">
+            <div style="font-family:'Bebas Neue',cursive;font-size:1.1rem;
+                        letter-spacing:0.14em;color:{color};">
+              CUT GUARDRAILS
+            </div>
+            <div style="font-family:'Bebas Neue',cursive;font-size:1.5rem;
+                        color:{color};letter-spacing:0.06em;">
+              {level.upper()} — {score}/100
+            </div>
+          </div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:0.76rem;
+                      color:#c8c8cc;margin-top:0.5rem;">{action}</div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:0.62rem;
+                      color:#555560;margin-top:0.4rem;letter-spacing:0.04em;">
+            retention {ret_score}/100 &nbsp;·&nbsp; cut pace {pace_label}
+            &nbsp;·&nbsp; recovery flags: {flags_str}
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_weekly_insights(df: pd.DataFrame) -> None:
     insights = build_weekly_insights(df)
     balance = insights["balance"]
-    muscle_group_volume = insights["muscle_group_volume"] or ["No muscle group volume this week."]
+    muscle_group_vol = insights["muscle_group_volume"] or ["No muscle group volume this week."]
     undertrained = insights.get("undertrained_muscle_groups") or ["No muscle group frequency gaps detected."]
     recommendations = insights.get("recommendations") or [insights["suggested_focus"]]
     suggested_exercises = insights.get("suggested_exercises") or ["No targeted exercise substitutions needed this week."]
@@ -423,7 +494,7 @@ def render_weekly_insights(df: pd.DataFrame) -> None:
         st.markdown(f"<ul>{_insight_list(combined_risks)}</ul>", unsafe_allow_html=True)
     with c3:
         st.markdown("##### Muscle Volume")
-        st.markdown(f"<ul>{_insight_list(muscle_group_volume)}</ul>", unsafe_allow_html=True)
+        st.markdown(f"<ul>{_insight_list(muscle_group_vol)}</ul>", unsafe_allow_html=True)
     with c4:
         st.markdown("##### Push/Pull/Legs")
         st.metric("Push", f"{balance['push']:.0f}%")
@@ -504,8 +575,12 @@ def render_daily_workout_detail(df: pd.DataFrame, filtered: pd.DataFrame) -> Non
         st.dataframe(comparison, use_container_width=True, hide_index=True)
 
 
-def render_strength_retention(df: pd.DataFrame) -> None:
-    retention = strength_retention_score(df)
+def render_strength_retention(df: pd.DataFrame, deload_dates: list) -> None:
+    try:
+        retention = strength_retention_score(df, deload_dates=deload_dates or None)
+    except Exception:
+        retention = {"score": 0, "improved_pct": 0.0, "maintained_pct": 0.0,
+                     "regressed_pct": 0.0, "interpretation": "Error computing retention.", "exercise_count": 0}
 
     section_header("Strength Retention Score")
     c1, c2, c3, c4 = st.columns(4)
@@ -519,8 +594,11 @@ def render_strength_retention(df: pd.DataFrame) -> None:
     )
 
 
-def render_fatigue_risk(df: pd.DataFrame) -> None:
-    fatigue = fatigue_risk_detector(df)
+def render_fatigue_risk(df: pd.DataFrame, deload_dates: list) -> None:
+    try:
+        fatigue = fatigue_risk_detector(df, deload_dates=deload_dates or None)
+    except Exception:
+        fatigue = {"risk": "Low", "reasons": ["Error computing fatigue risk."], "suggested_action": ""}
 
     section_header("Fatigue Risk Detector")
     c1, c2 = st.columns([1, 3])
@@ -532,50 +610,115 @@ def render_fatigue_risk(df: pd.DataFrame) -> None:
         st.caption(f"Suggested action: {fatigue['suggested_action']}")
 
 
-def render_bodyweight_recovery(checkins: pd.DataFrame, workout_df: pd.DataFrame) -> None:
-    section_header("Bodyweight & Recovery")
-    if checkins.empty:
-        st.info(
-            "Optional Checkins tab not found or empty. Add a Google Sheet tab named Checkins with "
-            "Date, Bodyweight, Waist, Calories, Protein, SleepHours, Energy, Soreness, Stress."
-        )
+def render_session_quality(df: pd.DataFrame) -> None:
+    section_header("Session Quality Score")
+    try:
+        sq = session_quality_score(df)
+    except Exception:
+        sq = pd.DataFrame()
+
+    if sq.empty:
+        st.info("Need at least 2 sessions to compute quality scores.")
         return
 
-    metrics = checkin_metrics(checkins)
-    retention = strength_retention_score(workout_df)
+    latest_score = float(sq["QualityScore"].iloc[-1])
+    avg_score = float(sq["QualityScore"].mean())
+    trend = float(sq["QualityScore"].iloc[-1]) - float(sq["QualityScore"].iloc[-min(5, len(sq))]) if len(sq) >= 2 else 0.0
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric(
-        "7-Day Bodyweight",
-        "0" if pd.isna(metrics["bodyweight_7day_avg"]) else f"{metrics['bodyweight_7day_avg']:.1f} lbs",
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Latest Session", f"{latest_score:.0f}/100")
+    c2.metric("30-Session Avg", f"{avg_score:.0f}/100")
+    c3.metric("5-Session Trend", f"{trend:+.0f} pts")
+    st.plotly_chart(line_session_quality(sq), use_container_width=True)
+
+
+def render_mev_warnings(df: pd.DataFrame) -> None:
+    try:
+        warnings = minimum_effective_volume(df)
+    except Exception:
+        return
+    if not warnings:
+        return
+
+    section_header("Minimum Effective Volume")
+    items_html = "".join(
+        f"<li style='margin-bottom:0.3rem;'>{escape(w)}</li>" for w in warnings
     )
-    c2.metric(
-        "Weekly Loss",
-        "0" if pd.isna(metrics["weekly_weight_loss_rate"]) else f"{metrics['weekly_weight_loss_rate']:.1f} lbs/wk",
-    )
-    c3.metric(
-        "Protein",
-        "0" if pd.isna(metrics["average_protein"]) else f"{metrics['average_protein']:.0f} g",
-    )
-    c4.metric(
-        "Sleep",
-        "0" if pd.isna(metrics["average_sleep"]) else f"{metrics['average_sleep']:.1f} h",
+    st.markdown(
+        f"""
+        <div style="background:#1a0f00;border:1px solid #7a4800;border-left:3px solid #e8890c;
+                    border-radius:3px;padding:0.9rem 1rem;margin-bottom:0.5rem;">
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:0.7rem;
+                      letter-spacing:0.12em;text-transform:uppercase;color:#e8890c;margin-bottom:0.5rem;">
+            MEV Warning — Muscle Groups Below Minimum Sets
+          </div>
+          <ul style="margin:0;padding-left:1.2rem;font-family:'IBM Plex Mono',monospace;
+                     font-size:0.72rem;color:#c8c8cc;line-height:1.6;">
+            {items_html}
+          </ul>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
-    left, right = st.columns([2, 1])
-    with left:
-        st.plotly_chart(line_bodyweight_trend(checkins), use_container_width=True)
-    with right:
-        st.markdown("##### Recovery Summary")
-        st.caption(f"Cut pace: {str(metrics['cut_pace']).title()}")
-        st.caption(str(metrics["recovery_summary"]))
-        warnings = list(metrics["warnings"])
-        if metrics["cut_pace"] == "aggressive" and retention["regressed_pct"] > 0:
-            warnings.append("Weight is dropping fast while strength retention is declining.")
-        if warnings:
-            st.warning(" ".join(warnings))
-        else:
-            st.success("No recovery warnings from check-ins.")
+
+def render_bodyweight_recovery(checkins: pd.DataFrame, workout_df: pd.DataFrame) -> None:
+    section_header("Bodyweight & Recovery")
+
+    if checkins.empty:
+        c1, c2 = st.columns(2)
+        with c1:
+            checkins_placeholder(
+                "Bodyweight Trend",
+                "Add a Google Sheet tab named 'Checkins' with columns: "
+                "Date, Bodyweight, Waist, Calories, Protein, SleepHours, "
+                "Energy, Soreness, Stress, Deload",
+            )
+        with c2:
+            checkins_placeholder(
+                "Recovery Summary",
+                "Track sleep, soreness, stress, and energy daily to see trends here.",
+            )
+        return
+
+    try:
+        metrics = checkin_metrics(checkins)
+        retention = strength_retention_score(workout_df)
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric(
+            "7-Day Bodyweight",
+            "0" if pd.isna(metrics["bodyweight_7day_avg"]) else f"{float(metrics['bodyweight_7day_avg']):.1f} lbs",
+        )
+        c2.metric(
+            "Weekly Loss",
+            "0" if pd.isna(metrics["weekly_weight_loss_rate"]) else f"{float(metrics['weekly_weight_loss_rate']):.1f} lbs/wk",
+        )
+        c3.metric(
+            "Protein",
+            "0" if pd.isna(metrics["average_protein"]) else f"{float(metrics['average_protein']):.0f} g",
+        )
+        c4.metric(
+            "Sleep",
+            "0" if pd.isna(metrics["average_sleep"]) else f"{float(metrics['average_sleep']):.1f} h",
+        )
+
+        left, right = st.columns([2, 1])
+        with left:
+            st.plotly_chart(line_bodyweight_trend(checkins), use_container_width=True)
+        with right:
+            st.markdown("##### Recovery Summary")
+            st.caption(f"Cut pace: {str(metrics['cut_pace']).title()}")
+            st.caption(str(metrics["recovery_summary"]))
+            warnings = list(metrics["warnings"])
+            if metrics["cut_pace"] == "aggressive" and retention["regressed_pct"] > 0:
+                warnings.append("Weight is dropping fast while strength retention is declining.")
+            if warnings:
+                st.warning(" ".join(warnings))
+            else:
+                st.success("No recovery warnings from check-ins.")
+    except Exception as exc:
+        st.warning(f"Could not render bodyweight/recovery section: {exc}")
 
 
 def render_dashboard(df: pd.DataFrame, checkins: pd.DataFrame) -> None:
@@ -596,9 +739,17 @@ def render_dashboard(df: pd.DataFrame, checkins: pd.DataFrame) -> None:
         st.info("No rows match the selected filters.")
         return
 
+    # Deload dates suppress fatigue/retention warnings
+    deload_dates = get_deload_dates(checkins)
+
+    # Prominent guardrails banner
+    render_guardrails_banner(filtered, checkins, deload_dates)
+
     render_weekly_insights(filtered)
-    render_strength_retention(filtered)
-    render_fatigue_risk(filtered)
+    render_strength_retention(filtered, deload_dates)
+    render_fatigue_risk(filtered, deload_dates)
+    render_mev_warnings(filtered)
+    render_session_quality(filtered)
     render_bodyweight_recovery(checkins, filtered)
 
     section_header("Muscle Group Frequency")
@@ -706,7 +857,6 @@ def render_correlations(workout_df: pd.DataFrame, health_df: pd.DataFrame | None
     else:
         merged = daily_w.copy()
 
-    # ── 1. Body weight vs e1RM over time ──────────────────────────────
     section_header("Body Composition vs Strength")
     if _has_col(merged, "body_weight_lbs") and _has_col(merged, "daily_best_e1rm"):
         st.plotly_chart(
@@ -720,7 +870,6 @@ def render_correlations(workout_df: pd.DataFrame, health_df: pd.DataFrame | None
             "Upload Apple Health export to compare body weight trends with strength progress",
         )
 
-    # ── 2. Steps vs volume  /  Caloric intake vs next-day volume ──────
     section_header("Activity & Nutrition Correlations")
     left, right = st.columns(2)
 
@@ -732,14 +881,10 @@ def render_correlations(workout_df: pd.DataFrame, health_df: pd.DataFrame | None
                 use_container_width=True,
             )
         else:
-            placeholder_card(
-                "Daily Steps vs Workout Volume",
-                "Requires step count data from Apple Health",
-            )
+            placeholder_card("Daily Steps vs Workout Volume", "Requires step count data from Apple Health")
 
     with right:
         if _has_col(merged, "calories_in") and _has_col(merged, "daily_volume"):
-            # Lag: for each calorie date look up volume on the next calendar day
             cal = merged.set_index("date")["calories_in"].dropna()
             vol = merged.set_index("date")["daily_volume"]
             lag_rows = [
@@ -754,15 +899,13 @@ def render_correlations(workout_df: pd.DataFrame, health_df: pd.DataFrame | None
                     use_container_width=True,
                 )
             else:
-                placeholder_card("Caloric Intake vs Next-Day Volume",
-                                  "No overlapping calorie + workout days found")
+                placeholder_card("Caloric Intake vs Next-Day Volume", "No overlapping calorie + workout days found")
         else:
             placeholder_card(
                 "Caloric Intake vs Next-Day Volume (lagged)",
                 "Requires dietary calorie data synced to Apple Health (e.g. MyFitnessPal)",
             )
 
-    # ── 3. Sleep vs volume / e1RM ─────────────────────────────────────
     section_header("Sleep vs Performance")
     left, right = st.columns(2)
 
@@ -775,8 +918,7 @@ def render_correlations(workout_df: pd.DataFrame, health_df: pd.DataFrame | None
                 use_container_width=True,
             )
         else:
-            placeholder_card("Sleep Duration vs Training Volume",
-                              "Requires sleep data from Apple Health")
+            placeholder_card("Sleep Duration vs Training Volume", "Requires sleep data from Apple Health")
 
     with right:
         if _has_col(merged, "sleep_hours") and _has_col(merged, "daily_best_e1rm"):
@@ -787,22 +929,14 @@ def render_correlations(workout_df: pd.DataFrame, health_df: pd.DataFrame | None
                 use_container_width=True,
             )
         else:
-            placeholder_card("Sleep Duration vs Estimated 1RM",
-                              "Requires sleep data from Apple Health")
+            placeholder_card("Sleep Duration vs Estimated 1RM", "Requires sleep data from Apple Health")
 
-    # ── 4. Full correlation matrix ─────────────────────────────────────
     section_header("Full Correlation Matrix")
     available = [c for c in _CORR_LABELS if c in merged.columns and merged[c].notna().sum() >= 4]
 
     if len(available) >= 3:
-        corr_data = (
-            merged[available]
-            .rename(columns={c: _CORR_LABELS[c] for c in available})
-        )
-        st.plotly_chart(
-            correlation_heatmap(corr_data.corr()),
-            use_container_width=True,
-        )
+        corr_data = merged[available].rename(columns={c: _CORR_LABELS[c] for c in available})
+        st.plotly_chart(correlation_heatmap(corr_data.corr()), use_container_width=True)
     else:
         placeholder_card(
             "Correlation Matrix — all metrics",
@@ -830,19 +964,12 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    # ── Page navigation ───────────────────────────────────────────────
     st.sidebar.markdown("## Navigation")
-    page = st.sidebar.radio(
-        "",
-        ["Dashboard", "Correlations"],
-        label_visibility="collapsed",
-    )
+    page = st.sidebar.radio("", ["Dashboard", "Correlations"], label_visibility="collapsed")
     st.sidebar.markdown("<div style='height:0.25rem'></div>", unsafe_allow_html=True)
 
-    # ── Apple Health uploader ─────────────────────────────────────────
     health_df = health_uploader()
 
-    # ── Workout data ──────────────────────────────────────────────────
     spreadsheet_id = st.sidebar.text_input(
         "Google Spreadsheet ID",
         value=os.getenv("WORKOUT_SPREADSHEET_ID", DEFAULT_SPREADSHEET_ID),
