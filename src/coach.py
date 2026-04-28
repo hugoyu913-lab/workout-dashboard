@@ -126,10 +126,14 @@ def _latest_checkin(checkins: pd.DataFrame | None) -> pd.Series | None:
 
 
 def _today_checkin(checkins: pd.DataFrame | None) -> pd.Series | None:
+    return _checkin_for_date(checkins, _today())
+
+
+def _checkin_for_date(checkins: pd.DataFrame | None, target_date: date) -> pd.Series | None:
     data = _prep_checkins(checkins)
     if data.empty:
         return None
-    today_rows = data[data["Date"].dt.date == _today()]
+    today_rows = data[data["Date"].dt.date == target_date]
     if today_rows.empty:
         return None
     return today_rows.iloc[-1]
@@ -439,6 +443,98 @@ def build_split_rotation_status(df: pd.DataFrame | None, today: date | None = No
     }
 
 
+def _filled_checkin_fields(row: pd.Series | None, fields: list[str]) -> list[str]:
+    if row is None:
+        return []
+    filled: list[str] = []
+    for field in fields:
+        value = pd.to_numeric(row.get(field), errors="coerce")
+        if pd.notna(value):
+            filled.append(field)
+    return filled
+
+
+def build_todays_priority(
+    df: pd.DataFrame | None,
+    checkins: pd.DataFrame | None,
+    today: date | None = None,
+) -> dict[str, object]:
+    ref = today or _today()
+    readiness = compute_readiness(checkins)
+    rotation = build_split_rotation_status(df, ref)
+    today_row = _checkin_for_date(checkins, ref)
+    readiness_score = int(readiness["score"])
+    rotation_muscles = list(rotation.get("expected_muscles", []))
+    if rotation.get("rotation_complete") and not rotation_muscles:
+        rotation_muscles = list(rotation.get("next_muscles", []))
+    rotation_known = bool(rotation.get("rotation_determined") and rotation_muscles)
+    expected_split = _split_label(rotation_muscles) if rotation_muscles else str(rotation.get("expected_today") or "Workout")
+    required_fields = ["SleepHours", "Energy", "Soreness", "Stress"]
+    filled_fields = _filled_checkin_fields(today_row, required_fields)
+    workout_data_sufficient = not _prep_workouts(df).empty
+    try:
+        severe_recovery = _has_severe_recovery_warning(weekly_warnings(df, checkins))
+    except Exception:
+        severe_recovery = False
+
+    if today_row is None:
+        priority_title = "Log today's check-in first"
+        action_tag = "Log Checkins"
+        priority_reason = "Missing checkins lowers confidence because recovery data is incomplete."
+        why = "Missing checkins lowers confidence because recovery data is incomplete."
+    elif readiness_score < 30:
+        priority_title = "Recovery Day"
+        action_tag = "Recovery"
+        priority_reason = "Low readiness means recovery is the highest-return move today."
+        why = "Low readiness means recovery is the highest-return move today."
+    elif severe_recovery:
+        priority_title = "Recovery Day"
+        action_tag = "Recovery"
+        priority_reason = "Fatigue or regression warnings make recovery the highest-return move today."
+        why = "Recovery now protects strength retention during the cut."
+    elif readiness_score < 50:
+        priority_title = f"{expected_split} at 2-3 RIR"
+        action_tag = "Train Smart"
+        priority_reason = f"Following rotation with low readiness, so keep {expected_split} conservative."
+        why = "This keeps your split on track while preserving strength during the cut."
+    else:
+        priority_title = expected_split
+        action_tag = "Train"
+        day_label = str(rotation.get("expected_day_label", "Rotation"))
+        priority_reason = f"Following rotation: {day_label} = {expected_split}."
+        why = "This keeps your split on track while preserving strength during the cut."
+
+    if today_row is None or not rotation_known or not workout_data_sufficient:
+        confidence_level = "Low"
+        if today_row is None:
+            confidence_reason = "No checkin row exists for today."
+        elif not rotation_known:
+            confidence_reason = "Split rotation could not be determined."
+        else:
+            confidence_reason = "Workout data is insufficient."
+    elif len(filled_fields) == len(required_fields):
+        confidence_level = "High"
+        confidence_reason = "Today's sleep, energy, soreness, stress, and split rotation are available."
+    else:
+        confidence_level = "Medium"
+        missing = ", ".join(field for field in required_fields if field not in filled_fields)
+        confidence_reason = f"Rotation is known, but checkins are partial: missing {missing}."
+
+    return {
+        "priority_title": priority_title,
+        "priority_reason": priority_reason,
+        "confidence_level": confidence_level,
+        "confidence_reason": confidence_reason,
+        "action_tag": action_tag,
+        "why_this_matters": why,
+        "readiness_score": readiness_score,
+        "expected_split": expected_split,
+        "expected_muscles": rotation_muscles,
+        "rotation": rotation,
+        "has_today_checkin": today_row is not None,
+    }
+
+
 def _split_score(split: list[str], checklist: list[dict[str, object]], target_muscles: list[str]) -> float:
     by_muscle = {str(row["muscle_key"]): row for row in checklist}
     target_set = set(target_muscles)
@@ -571,6 +667,7 @@ def generate_game_plan(
     checklist: list[dict[str, object]],
     rotation: dict[str, object] | None = None,
     severe_recovery: bool = False,
+    priority: dict[str, object] | None = None,
 ) -> dict[str, object]:
     rotation_muscles = list(rotation.get("expected_muscles", [])) if rotation else []
     if rotation and rotation.get("rotation_complete") and not rotation_muscles:
@@ -578,7 +675,19 @@ def generate_game_plan(
     rotation_available = bool(rotation and rotation.get("rotation_determined") and rotation_muscles)
     muscles: list[str] = []
 
-    if readiness_score < 30:
+    if priority and priority.get("action_tag") == "Log Checkins":
+        focus = str(priority["priority_title"])
+        reason = str(priority["priority_reason"])
+        split_muscles = []
+    elif priority and priority.get("action_tag") in {"Train", "Train Smart"}:
+        focus = str(priority["expected_split"])
+        reason = str(priority["priority_reason"])
+        split_muscles = list(priority.get("expected_muscles", []))
+    elif priority and priority.get("action_tag") == "Recovery":
+        focus = "Recovery"
+        reason = str(priority["priority_reason"])
+        split_muscles = []
+    elif readiness_score < 30:
         focus = "Recovery"
         reason = "Readiness is below 30, so recovery protects strength retention."
         split_muscles: list[str] = []
@@ -597,7 +706,11 @@ def generate_game_plan(
     else:
         muscles = _target_muscles(checklist, readiness_score)
         focus, reason, split_muscles = _focus_for_muscles(muscles, readiness_score, checklist)
-    if readiness_score >= 70:
+    if focus == "Log today's check-in first":
+        intensity = "Log checkins before confirming training intensity."
+    elif focus == "Recovery":
+        intensity = "Skip hard sets - walk, mobility, and recovery work only."
+    elif readiness_score >= 70:
         intensity = "Work to 0-1 RIR - push the last set"
     elif readiness_score >= 50:
         intensity = "Work to 1-2 RIR - leave a rep in the tank"
@@ -606,8 +719,9 @@ def generate_game_plan(
     return {
         "focus": focus,
         "reason": reason,
-        "exercises": [] if focus == "Recovery" else _exercise_targets(df, split_muscles or muscles, readiness_score),
+        "exercises": [] if focus in {"Recovery", "Log today's check-in first"} else _exercise_targets(df, split_muscles or muscles, readiness_score),
         "intensity": intensity,
+        "action_tag": str(priority.get("action_tag", "")) if priority else "",
     }
 
 
@@ -1003,6 +1117,55 @@ def _render_checkins_status(checkins: pd.DataFrame | None) -> None:
     )
 
 
+def _render_todays_priority(priority: dict[str, object]) -> None:
+    confidence = str(priority["confidence_level"])
+    action = str(priority["action_tag"])
+    action_color = {
+        "Train": "#22c55e",
+        "Train Smart": "#f59e0b",
+        "Recovery": "#ef4444",
+        "Log Checkins": "#60a5fa",
+    }.get(action, "#e8890c")
+    confidence_color = {
+        "High": "#22c55e",
+        "Medium": "#f59e0b",
+        "Low": "#ef4444",
+    }.get(confidence, "#888890")
+    st.markdown(
+        f"""
+        <div style="background:#111113;border:1px solid #1e1e22;border-left:5px solid {action_color};
+                    border-radius:4px;padding:1.3rem 1.4rem;margin-bottom:1rem;">
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:0.62rem;
+                      letter-spacing:0.22em;text-transform:uppercase;color:#555560;">
+            TODAY'S PRIORITY
+          </div>
+          <div style="font-family:'Bebas Neue',cursive;font-size:2.65rem;line-height:1;
+                      letter-spacing:0.08em;color:#f0f0f2;margin-top:0.45rem;">
+            {escape(str(priority["priority_title"]))}
+          </div>
+          <div style="display:flex;gap:0.65rem;flex-wrap:wrap;margin-top:0.85rem;">
+            <span style="border:1px solid {action_color};color:{action_color};border-radius:3px;
+                         padding:0.28rem 0.55rem;font-size:0.66rem;letter-spacing:0.14em;
+                         text-transform:uppercase;">Action: {escape(action)}</span>
+            <span style="border:1px solid {confidence_color};color:{confidence_color};border-radius:3px;
+                         padding:0.28rem 0.55rem;font-size:0.66rem;letter-spacing:0.14em;
+                         text-transform:uppercase;">Confidence: {escape(confidence)}</span>
+          </div>
+          <div style="font-size:0.76rem;color:#c8c8cc;margin-top:0.85rem;line-height:1.5;">
+            {escape(str(priority["priority_reason"]))}
+          </div>
+          <div style="font-size:0.68rem;color:#777782;margin-top:0.55rem;line-height:1.45;">
+            Why this matters: {escape(str(priority["why_this_matters"]))}
+          </div>
+          <div style="font-size:0.62rem;color:#555560;margin-top:0.45rem;line-height:1.45;">
+            Confidence: {escape(str(priority["confidence_reason"]))}
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def _render_split_rotation(rotation: dict[str, object]) -> None:
     st.markdown("### SPLIT ROTATION TRACKER")
     status = str(rotation["rotation_status"])
@@ -1100,7 +1263,10 @@ def _render_game_plan(plan: dict[str, object]) -> None:
     )
     exercises = plan.get("exercises", [])
     if not exercises:
-        st.caption("Recovery plan: walk, mobility, and no hard sets today.")
+        if plan.get("action_tag") == "Log Checkins":
+            st.caption("Log today's checkins first, then use the priority card to confirm training readiness.")
+        else:
+            st.caption("Recovery plan: walk, mobility, and no hard sets today.")
         return
     cols = st.columns(len(exercises))
     for col, ex in zip(cols, exercises):
@@ -1188,7 +1354,8 @@ def render_coach_page(
 ) -> None:
     readiness = compute_readiness(checkins)
     checklist = weekly_muscle_checklist(df)
-    rotation = build_split_rotation_status(df)
+    priority = build_todays_priority(df, checkins)
+    rotation = dict(priority["rotation"])
     warnings = weekly_warnings(df, checkins)
     plan = generate_game_plan(
         df,
@@ -1196,9 +1363,12 @@ def render_coach_page(
         checklist,
         rotation=rotation,
         severe_recovery=_has_severe_recovery_warning(warnings),
+        priority=priority,
     )
     progress = weekly_progress_tracker(df, checkins)
 
+    _render_todays_priority(priority)
+    st.divider()
     _render_readiness(readiness)
     _render_checkins_status(checkins)
     st.divider()

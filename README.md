@@ -4,7 +4,7 @@ Streamlit dashboard backed by a Google Sheets workout log. Reads every worksheet
 
 The optional `Checkins` Google Sheet tab adds bodyweight trend (7-day rolling average), cut-pace classification, recovery signal tracking, and feeds the Cut Guardrails composite risk banner.
 
-The first page is **Coach**, a daily cutting-phase action plan. It combines Checkins recovery data, steps, nutrition, weekly muscle frequency, anchor-lift strength retention, cut pace, and the Monday-anchored custom split rotation into a deterministic readiness score, daily target checklist, workout focus, exercise targets, weekly progress tracker, and warning/action cards.
+The first page is **Coach**, a daily cutting-phase action plan. It combines Checkins recovery data, steps, nutrition, weekly muscle frequency, anchor-lift strength retention, cut pace, and the Monday-anchored custom split rotation into a deterministic Today's Priority card, readiness score, daily target checklist, workout focus, exercise targets, weekly progress tracker, and warning/action cards.
 
 The **Grades** page explains individual session grades. Select any logged workout date to see the grade, category score breakdown, what went well, what needs work, a cut-phase adjustment for next time, previous-session comparisons, and a per-exercise drilldown with status vs. the exercise's previous occurrence.
 
@@ -130,7 +130,9 @@ Fri: Back + Shoulders
 Sat: Legs
 ```
 
-The rotation starts every Monday and only advances when the expected split is completed. Skipped days do not advance the rotation, so the next training day keeps the missed split as the expected workout. Today's Game Plan prioritizes that expected split unless readiness is below 30 or a severe fatigue/regression warning calls for recovery.
+The rotation starts every Monday and only advances when the expected split is completed. Skipped days do not advance the rotation, so the next training day keeps the missed split as the expected workout. Today's Priority and Today's Game Plan prioritize that expected split unless readiness is below 30 or a severe fatigue/regression warning calls for recovery.
+
+The Today's Priority card also shows an action tag (`Train`, `Train Smart`, `Recovery`, or `Log Checkins`) and a confidence level. Confidence is highest when today's Checkins row has sleep, energy, soreness, and stress filled and the split rotation is known; missing or partial checkins lower confidence.
 
 ---
 

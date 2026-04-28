@@ -99,7 +99,7 @@ streamlit run app.py
 ## Current Working Features
 
 - Google Sheets client with Streamlit secrets support and local service-account JSON fallback.
-- Coach page is the first navigation item. It provides a deterministic daily cutting checklist with readiness scoring, today's lifestyle targets, a Monday-anchored split rotation tracker, muscle-group frequency cards, a recommended custom split or Recovery focus, 2-set exercise targets, weekly progress bars, and warning/action cards.
+- Coach page is the first navigation item. It provides a deterministic daily cutting checklist with a Today's Priority and confidence card, readiness scoring, today's lifestyle targets, a Monday-anchored split rotation tracker, muscle-group frequency cards, a recommended custom split or Recovery focus, 2-set exercise targets, weekly progress bars, and warning/action cards.
 - Workbook-wide worksheet loading through `gspread`.
 - Parsing of the current block-header sheet format where each session starts with a row like `Workout Date | Weight | Reps`.
 - Bare `m/d` date handling with inferred year rollovers.
