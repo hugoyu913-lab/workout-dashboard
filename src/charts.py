@@ -9,7 +9,7 @@ from config.profile import (
     DAILY_FAT_TARGET,
     DAILY_PROTEIN_TARGET,
     DAILY_SLEEP_TARGET,
-    DAILY_STEPS_GOAL,
+    DAILY_STEPS_TARGET,
 )
 
 _ACCENT = "#e8890c"
@@ -164,9 +164,9 @@ def bar_checkin_steps(df: pd.DataFrame, days: int = 30) -> go.Figure:
         name="Steps",
     ))
     fig.add_hline(
-        y=DAILY_STEPS_GOAL,
+        y=DAILY_STEPS_TARGET,
         line=dict(color=_ACCENT, width=1.5, dash="dot"),
-        annotation_text=f"{DAILY_STEPS_GOAL:,}",
+        annotation_text=f"{DAILY_STEPS_TARGET:,}",
         annotation_font=dict(color=_ACCENT, size=10, family=_FONT),
     )
     fig.update_layout(yaxis_title="Steps", xaxis_title="")

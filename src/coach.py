@@ -15,7 +15,7 @@ from config.profile import (
     DAILY_PROTEIN_TARGET,
     DAILY_SLEEP_MINIMUM,
     DAILY_SLEEP_TARGET,
-    DAILY_STEPS_GOAL,
+    DAILY_STEPS_TARGET,
     MAX_MUSCLE_FREQ_PER_WEEK,
     TARGET_REPS_MAX,
     TARGET_REPS_MIN,
@@ -184,7 +184,7 @@ def compute_readiness(checkins: pd.DataFrame | None) -> dict[str, object]:
         steps = pd.to_numeric(last.get("Steps"), errors="coerce")
         if pd.notna(steps):
             steps = float(steps)
-            if steps > DAILY_STEPS_GOAL:
+            if steps > DAILY_STEPS_TARGET:
                 delta = 10
             elif steps >= 7500:
                 delta = 5
@@ -654,25 +654,28 @@ def build_progressive_overload_targets(
         last_weight = float(best["Weight"])
         last_reps = float(best["Reps"])
         muscle_group = str(best.get("MuscleGroup", "")).strip().lower()
-        hold_load = fatigue_high or (readiness is not None and readiness < 50)
         increment = _load_increment(exercise_name, muscle_group)
 
-        if hold_load:
+        if fatigue_high:
             recommended_weight = last_weight
             recommended_reps = f"{TARGET_REPS_MIN}-{TARGET_REPS_MAX}"
-            instruction = "Hold load today due to readiness/fatigue."
+            instruction = "Hold load today — fatigue risk high"
+        elif readiness is not None and readiness < 50:
+            recommended_weight = last_weight
+            recommended_reps = f"{TARGET_REPS_MIN}-{TARGET_REPS_MAX}"
+            instruction = "Hold load today — readiness low"
         elif last_reps >= TARGET_REPS_MAX:
             recommended_weight = last_weight + increment
             recommended_reps = f"{TARGET_REPS_MIN}-{TARGET_REPS_MAX}"
-            instruction = f"Hit {TARGET_REPS_MAX:g} reps last time - add {increment} lbs next session."
+            instruction = "Hit top of rep range — increase load"
         elif last_reps >= TARGET_REPS_MIN:
             recommended_weight = last_weight
-            recommended_reps = f"{TARGET_REPS_MAX} goal"
-            instruction = f"Keep load and aim for {TARGET_REPS_MAX:g} reps."
+            recommended_reps = f"{TARGET_REPS_MIN}-{TARGET_REPS_MAX}"
+            instruction = "Stay at weight — aim for 8 reps"
         else:
             recommended_weight = last_weight
             recommended_reps = f"{TARGET_REPS_MIN}-{TARGET_REPS_MAX}"
-            instruction = f"Reps were below {TARGET_REPS_MIN}; hold or reduce load before progressing."
+            instruction = "Below range — hold or reduce weight"
 
         targets.append({
             "exercise": exercise_name,
@@ -726,7 +729,7 @@ def _exercise_targets(
                     "last_reps": last_r,
                     "target_weight": target_w,
                     "target_reps": target_reps,
-                    "overload_note": str(overload.get("instruction", "No prior target data - use normal working range.")),
+                    "overload_note": str(overload.get("instruction", "No history found")),
                     "is_anchor": _is_anchor(exercise),
                 })
                 used.add(key)
@@ -751,7 +754,7 @@ def _exercise_targets(
                 "last_reps": last_r,
                 "target_weight": overload.get("recommended_weight", last_w),
                 "target_reps": overload.get("recommended_reps", f"{TARGET_REPS_MIN}-{TARGET_REPS_MAX}" if last_w is not None else None),
-                "overload_note": str(overload.get("instruction", "No prior target data - use normal working range.")),
+                "overload_note": str(overload.get("instruction", "No history found")),
                 "is_anchor": _is_anchor(exercise),
             })
             used.add(key)
@@ -908,7 +911,7 @@ def weekly_progress_tracker(df: pd.DataFrame | None, checkins: pd.DataFrame | No
                 complete = week_c.dropna(subset=target_cols).copy()
                 if not complete.empty:
                     hit = (
-                        (complete["Steps"] >= DAILY_STEPS_GOAL)
+                        (complete["Steps"] >= DAILY_STEPS_TARGET)
                         & (complete["Calories"].between(DAILY_CALORIES_TARGET * 0.9, DAILY_CALORIES_TARGET * 1.1))
                         & (complete["Protein"] >= DAILY_PROTEIN_TARGET)
                         & (complete["SleepHours"] >= DAILY_SLEEP_MINIMUM)
@@ -919,7 +922,7 @@ def weekly_progress_tracker(df: pd.DataFrame | None, checkins: pd.DataFrame | No
                 complete_all = c.dropna(subset=target_cols).sort_values("Date", ascending=False)
                 for row in complete_all.itertuples(index=False):
                     if (
-                        float(getattr(row, "Steps")) >= DAILY_STEPS_GOAL
+                        float(getattr(row, "Steps")) >= DAILY_STEPS_TARGET
                         and DAILY_CALORIES_TARGET * 0.9 <= float(getattr(row, "Calories")) <= DAILY_CALORIES_TARGET * 1.1
                         and float(getattr(row, "Protein")) >= DAILY_PROTEIN_TARGET
                         and float(getattr(row, "SleepHours")) >= DAILY_SLEEP_MINIMUM
@@ -1129,7 +1132,7 @@ def _render_today_targets(checkins: pd.DataFrame | None, spreadsheet_id: str | N
         st.caption(message)
 
     targets = [
-        ("STEPS", "Steps", DAILY_STEPS_GOAL, ""),
+        ("STEPS", "Steps", DAILY_STEPS_TARGET, ""),
         ("CALORIES", "Calories", DAILY_CALORIES_TARGET, ""),
         ("PROTEIN", "Protein", DAILY_PROTEIN_TARGET, "g"),
         ("CARBS", "Carbs", DAILY_CARBS_TARGET, "g"),
@@ -1458,15 +1461,45 @@ def render_anchor_lift_trends(df: pd.DataFrame | None) -> None:
             col.markdown(_card(str(row["exercise"]), body, str(row["color"])), unsafe_allow_html=True)
 
 
+def _anchor_lift_debug_rows(df: pd.DataFrame | None) -> list[dict[str, str]]:
+    work = _prep_workouts(df)
+    rows: list[dict[str, str]] = []
+    for exercise in _anchor_lift_names():
+        sessions = _anchor_session_bests(work, exercise)
+        if sessions.empty:
+            rows.append({
+                "Anchor lift name": exercise,
+                "Found in data": "No",
+                "Last logged date": "Never",
+                "Last weight x reps": "—",
+            })
+            continue
+
+        latest = sessions.iloc[-1]
+        last_date = pd.Timestamp(latest["Date"]).strftime("%Y-%m-%d")
+        rows.append({
+            "Anchor lift name": exercise,
+            "Found in data": "Yes",
+            "Last logged date": last_date,
+            "Last weight x reps": f"{float(latest['Weight']):g} x {float(latest['Reps']):g}",
+        })
+    return rows
+
+
+def _render_anchor_lift_debug(df: pd.DataFrame | None) -> None:
+    with st.expander("Anchor Lift Debug", expanded=False):
+        st.table(pd.DataFrame(_anchor_lift_debug_rows(df)))
+
+
 def _format_last(weight: float | None, reps: float | None) -> str:
     if weight is None or reps is None:
-        return "No prior logged performance"
+        return "No recent data"
     return f"{weight:g} x {reps:g}"
 
 
 def _format_target(weight: float | None, reps: object | None) -> str:
     if weight is None or reps is None:
-        return f"{TARGET_SETS} x {TARGET_REPS_MIN}-{TARGET_REPS_MAX} @ target RIR"
+        return "Start at working weight"
     if isinstance(reps, str):
         return f"{weight:g} x {reps}"
     return f"{weight:g} x {float(reps):g}"
@@ -1495,10 +1528,9 @@ def _render_game_plan(plan: dict[str, object]) -> None:
         name = str(ex["exercise"])
         title = f"{'⚓ ' if ex['is_anchor'] else ''}{name}"
         body = (
-            _small_line("Target", f"{ex['sets']} x {ex['rep_range']} @ {ex['rir']} RIR")
-            + _small_line("Last performance", _format_last(ex["last_weight"], ex["last_reps"]))
-            + _small_line("Target today", _format_target(ex["target_weight"], ex["target_reps"]), "#e8890c")
-            + _small_line("Overload note", ex.get("overload_note", ""))
+            _small_line("Last", _format_last(ex["last_weight"], ex["last_reps"]))
+            + _small_line("Target", _format_target(ex["target_weight"], ex["target_reps"]), "#e8890c")
+            + _small_line("Reason", ex.get("overload_note", "No history found"))
         )
         col.markdown(_card(title, body, "#e8890c" if ex["is_anchor"] else "#1e1e22"), unsafe_allow_html=True)
 
@@ -1531,7 +1563,7 @@ def _render_progress(progress: dict[str, object]) -> None:
     st.markdown("#### Lifestyle")
     empty_label = "No checkin rows" if progress.get("checkins_rows", 0) == 0 else "Not filled"
     lifestyle_rows = [
-        ("Avg daily steps", empty_label if progress["avg_steps"] is None else f"{progress['avg_steps']:,.0f} / {DAILY_STEPS_GOAL:,}", None if progress["avg_steps"] is None else float(progress["avg_steps"]), DAILY_STEPS_GOAL * 0.9, DAILY_STEPS_GOAL * 0.7),
+        ("Avg daily steps", empty_label if progress["avg_steps"] is None else f"{progress['avg_steps']:,.0f} / {DAILY_STEPS_TARGET:,}", None if progress["avg_steps"] is None else float(progress["avg_steps"]), DAILY_STEPS_TARGET * 0.9, DAILY_STEPS_TARGET * 0.7),
         ("Avg protein", empty_label if progress["avg_protein"] is None else f"{progress['avg_protein']:.0f}g / {DAILY_PROTEIN_TARGET}g", None if progress["avg_protein"] is None else float(progress["avg_protein"]), DAILY_PROTEIN_TARGET * 0.9, DAILY_PROTEIN_TARGET * 0.7),
         ("Avg sleep", empty_label if progress["avg_sleep"] is None else f"{progress['avg_sleep']:.1f}h / {DAILY_SLEEP_TARGET:g}h", None if progress["avg_sleep"] is None else float(progress["avg_sleep"]), DAILY_SLEEP_TARGET * 0.9, DAILY_SLEEP_MINIMUM),
         ("Avg calories", empty_label if progress["avg_calories"] is None else f"{progress['avg_calories']:,.0f} / {DAILY_CALORIES_TARGET:,}", None if progress["avg_calories"] is None else 100 - abs(float(progress["avg_calories"]) - DAILY_CALORIES_TARGET) / DAILY_CALORIES_TARGET * 100, 90, 70),
@@ -1580,7 +1612,7 @@ def render_coach_page(
     priority = build_todays_priority(df, checkins)
     rotation = dict(priority["rotation"])
     warnings = weekly_warnings(df, checkins)
-    fatigue = fatigue_risk_detector(df)
+    fatigue = fatigue_risk_detector(df, checkins=checkins)
     fatigue_high = str(fatigue.get("risk", "")).lower() == "high"
     plan = generate_game_plan(
         df,
@@ -1611,3 +1643,5 @@ def render_coach_page(
     _render_progress(progress)
     st.divider()
     _render_warnings(warnings)
+    st.divider()
+    _render_anchor_lift_debug(df)

@@ -69,6 +69,7 @@ def fatigue_risk_detector(
 
     same_weight_rep_drops: list[str] = []
     anchor_rep_drops: list[str] = []
+    anchor_regression_dates: list[pd.Timestamp] = []
     regression_dates_by_group: dict[str, list] = {}
     anchor_names = _anchor_lift_names()
 
@@ -93,11 +94,20 @@ def fatigue_risk_detector(
                 )
                 if _normalise_exercise(exercise) in anchor_names:
                     anchor_rep_drops.append(f"Anchor lift regression - {message}")
+                    anchor_regression_dates.append(pd.Timestamp(curr_row["Date"]))
                 else:
                     same_weight_rep_drops.append(message)
-                mg = str(curr_row.get("MuscleGroup", "unknown")).strip().lower() or "unknown"
-                if mg not in {"unknown", "other"}:
-                    regression_dates_by_group.setdefault(mg, []).append(curr_row["Date"])
+                    mg = str(curr_row.get("MuscleGroup", "unknown")).strip().lower() or "unknown"
+                    if mg not in {"unknown", "other"}:
+                        regression_dates_by_group.setdefault(mg, []).append(curr_row["Date"])
+
+    clustered_anchor_regressions = False
+    if len(anchor_regression_dates) >= 2:
+        anchor_dates_sorted = sorted(set(anchor_regression_dates))
+        for i in range(len(anchor_dates_sorted) - 1):
+            if (anchor_dates_sorted[i + 1] - anchor_dates_sorted[i]).days <= 14:
+                clustered_anchor_regressions = True
+                break
 
     # Muscle groups with 2+ regressions within any 14-day window
     clustered_groups: list[str] = []
@@ -124,6 +134,7 @@ def fatigue_risk_detector(
 
     # Checkin-based signals (suppressed during deload weeks)
     checkin_reasons: list[str] = []
+    anchor_recovery_escalation = False
     if checkins is not None and not checkins.empty and "Date" in checkins.columns:
         c = checkins.copy()
         c["Date"] = pd.to_datetime(c["Date"], errors="coerce")
@@ -142,6 +153,8 @@ def fatigue_risk_detector(
                     checkin_reasons.append(
                         f"Sleep was {float(sleep):.1f}h (below 6h threshold)."
                     )
+                if pd.notna(sleep) and float(sleep) < 6.5:
+                    anchor_recovery_escalation = True
                 if pd.notna(energy) and float(energy) <= 2:
                     checkin_reasons.append(
                         f"Energy level is {float(energy):.0f}/10 (critically low)."
@@ -150,13 +163,23 @@ def fatigue_risk_detector(
                     checkin_reasons.append(
                         f"Soreness is {float(soreness):.0f}/10 (elevated)."
                     )
+                    anchor_recovery_escalation = True
     reasons.extend(checkin_reasons)
 
-    # Risk scoring: any anchor regression triggers High immediately
-    if anchor_rep_drops:
+    if clustered_anchor_regressions:
         risk = "High"
         suggested_action = (
-            "Anchor lift regression detected — deload or form check recommended immediately."
+            "Multiple anchor lift regressions within 14 days detected - deload or form check recommended immediately."
+        )
+    elif anchor_rep_drops and anchor_recovery_escalation:
+        risk = "High"
+        suggested_action = (
+            "Anchor lift regression plus poor recovery detected - hold load and prioritize recovery."
+        )
+    elif anchor_rep_drops:
+        risk = "Moderate"
+        suggested_action = (
+            "Anchor lift regression detected - hold load and monitor the next session."
         )
     else:
         risk_points = (
