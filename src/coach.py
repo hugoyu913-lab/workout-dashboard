@@ -26,6 +26,7 @@ from config.profile import (
 )
 from src.metrics import checkin_metrics, grade_sessions_history
 from src.recommendations import EXERCISE_RECOMMENDATIONS_PATH
+from src.fatigue import fatigue_risk_detector
 
 MUSCLE_GROUPS = ["chest", "back", "shoulders", "arms", "legs", "core"]
 SPLIT_MUSCLES = [
@@ -60,7 +61,11 @@ def _normalise_exercise(name: str) -> str:
 
 
 def _is_anchor(exercise: str) -> bool:
-    return _normalise_exercise(exercise) in {_normalise_exercise(x) for x in ANCHOR_LIFTS}
+    if isinstance(ANCHOR_LIFTS, dict):
+        anchors = [lift for lifts in ANCHOR_LIFTS.values() for lift in lifts]
+    else:
+        anchors = list(ANCHOR_LIFTS)
+    return _normalise_exercise(exercise) in {_normalise_exercise(x) for x in anchors}
 
 
 def _prep_workouts(df: pd.DataFrame | None) -> pd.DataFrame:
@@ -600,11 +605,99 @@ def _last_performance(work: pd.DataFrame, exercise: str) -> tuple[float | None, 
     return float(row["Weight"]), float(row["Reps"])
 
 
-def _exercise_targets(df: pd.DataFrame | None, muscles: list[str], readiness: int) -> list[dict[str, object]]:
+def _load_increment(exercise: str, muscle_group: str | None = None) -> int:
+    key = _normalise_exercise(exercise)
+    muscle = str(muscle_group or "").strip().lower()
+    major_leg_terms = ("leg press", "hack squat", "squat", "deadlift", "rdl", "lunge")
+    if key in {"leg press", "hack squat"} or any(term in key for term in major_leg_terms):
+        return 10
+    if muscle == "legs" and any(term in key for term in ("press", "squat", "curl")):
+        return 10
+    return 5
+
+
+def build_progressive_overload_targets(
+    df: pd.DataFrame | None,
+    selected_exercises: list[str] | None = None,
+    readiness: int | None = None,
+    fatigue_high: bool = False,
+) -> list[dict[str, object]]:
+    work = _prep_workouts(df)
+    if work.empty:
+        return []
+
+    exercise_filter = {
+        _normalise_exercise(exercise)
+        for exercise in (selected_exercises or [])
+        if str(exercise).strip()
+    }
+    targets: list[dict[str, object]] = []
+    for exercise, rows in work.groupby("Exercise"):
+        exercise_name = str(exercise)
+        if exercise_filter and _normalise_exercise(exercise_name) not in exercise_filter:
+            continue
+        rows = rows.dropna(subset=["Date", "Weight", "Reps"]).sort_values("Date")
+        if rows.empty:
+            continue
+        latest_date = rows["Date"].max().date()
+        latest = rows[rows["Date"].dt.date == latest_date].copy()
+        if latest.empty:
+            continue
+        latest["Reps"] = pd.to_numeric(latest["Reps"], errors="coerce")
+        latest["Weight"] = pd.to_numeric(latest["Weight"], errors="coerce")
+        latest = latest.dropna(subset=["Weight", "Reps"]).sort_values(["Reps", "Weight"], ascending=[False, False])
+        if latest.empty:
+            continue
+        best = latest.iloc[0]
+        last_weight = float(best["Weight"])
+        last_reps = float(best["Reps"])
+        muscle_group = str(best.get("MuscleGroup", "")).strip().lower()
+        hold_load = fatigue_high or (readiness is not None and readiness < 50)
+        increment = _load_increment(exercise_name, muscle_group)
+
+        if hold_load:
+            recommended_weight = last_weight
+            recommended_reps = f"{TARGET_REPS_MIN}-{TARGET_REPS_MAX}"
+            instruction = "Hold load today due to readiness/fatigue."
+        elif last_reps >= TARGET_REPS_MAX:
+            recommended_weight = last_weight + increment
+            recommended_reps = f"{TARGET_REPS_MIN}-{TARGET_REPS_MAX}"
+            instruction = f"Hit {TARGET_REPS_MAX:g} reps last time - add {increment} lbs next session."
+        elif last_reps >= TARGET_REPS_MIN:
+            recommended_weight = last_weight
+            recommended_reps = f"{TARGET_REPS_MAX} goal"
+            instruction = f"Keep load and aim for {TARGET_REPS_MAX:g} reps."
+        else:
+            recommended_weight = last_weight
+            recommended_reps = f"{TARGET_REPS_MIN}-{TARGET_REPS_MAX}"
+            instruction = f"Reps were below {TARGET_REPS_MIN}; hold or reduce load before progressing."
+
+        targets.append({
+            "exercise": exercise_name,
+            "last_weight": last_weight,
+            "last_reps": last_reps,
+            "recommended_weight": recommended_weight,
+            "recommended_reps": recommended_reps,
+            "instruction": instruction,
+            "anchor_lift": _is_anchor(exercise_name),
+        })
+    return targets
+
+
+def _exercise_targets(
+    df: pd.DataFrame | None,
+    muscles: list[str],
+    readiness: int,
+    fatigue_high: bool = False,
+) -> list[dict[str, object]]:
     work = _prep_workouts(df)
     recs = _load_exercise_recs()
     selected: list[dict[str, object]] = []
     used: set[str] = set()
+    overload_by_exercise = {
+        _normalise_exercise(row["exercise"]): row
+        for row in build_progressive_overload_targets(df, readiness=readiness, fatigue_high=fatigue_high)
+    }
 
     if not recs.empty:
         for muscle in muscles:
@@ -618,8 +711,9 @@ def _exercise_targets(df: pd.DataFrame | None, muscles: list[str], readiness: in
                 if not exercise or key in used:
                     continue
                 last_w, last_r = _last_performance(work, exercise)
-                clean = last_r is not None and last_r >= TARGET_REPS_MAX
-                target_w = (last_w + 2.5) if last_w is not None and clean else last_w
+                overload = overload_by_exercise.get(key, {})
+                target_w = overload.get("recommended_weight", last_w)
+                target_reps = overload.get("recommended_reps", f"{TARGET_REPS_MIN}-{TARGET_REPS_MAX}" if target_w is not None else None)
                 selected.append({
                     "exercise": exercise,
                     "muscle_group": muscle,
@@ -629,7 +723,8 @@ def _exercise_targets(df: pd.DataFrame | None, muscles: list[str], readiness: in
                     "last_weight": last_w,
                     "last_reps": last_r,
                     "target_weight": target_w,
-                    "target_reps": TARGET_REPS_MIN if target_w is not None else None,
+                    "target_reps": target_reps,
+                    "overload_note": str(overload.get("instruction", "No prior target data - use normal working range.")),
                     "is_anchor": _is_anchor(exercise),
                 })
                 used.add(key)
@@ -643,6 +738,7 @@ def _exercise_targets(df: pd.DataFrame | None, muscles: list[str], readiness: in
             if key in used:
                 continue
             last_w, last_r = _last_performance(work, exercise)
+            overload = overload_by_exercise.get(key, {})
             selected.append({
                 "exercise": exercise,
                 "muscle_group": "",
@@ -651,8 +747,9 @@ def _exercise_targets(df: pd.DataFrame | None, muscles: list[str], readiness: in
                 "rir": TARGET_RIR,
                 "last_weight": last_w,
                 "last_reps": last_r,
-                "target_weight": last_w,
-                "target_reps": TARGET_REPS_MIN if last_w is not None else None,
+                "target_weight": overload.get("recommended_weight", last_w),
+                "target_reps": overload.get("recommended_reps", f"{TARGET_REPS_MIN}-{TARGET_REPS_MAX}" if last_w is not None else None),
+                "overload_note": str(overload.get("instruction", "No prior target data - use normal working range.")),
                 "is_anchor": _is_anchor(exercise),
             })
             used.add(key)
@@ -668,6 +765,7 @@ def generate_game_plan(
     rotation: dict[str, object] | None = None,
     severe_recovery: bool = False,
     priority: dict[str, object] | None = None,
+    fatigue_high: bool = False,
 ) -> dict[str, object]:
     rotation_muscles = list(rotation.get("expected_muscles", [])) if rotation else []
     if rotation and rotation.get("rotation_complete") and not rotation_muscles:
@@ -719,7 +817,12 @@ def generate_game_plan(
     return {
         "focus": focus,
         "reason": reason,
-        "exercises": [] if focus in {"Recovery", "Log today's check-in first"} else _exercise_targets(df, split_muscles or muscles, readiness_score),
+        "exercises": [] if focus in {"Recovery", "Log today's check-in first"} else _exercise_targets(
+            df,
+            split_muscles or muscles,
+            readiness_score,
+            fatigue_high=fatigue_high,
+        ),
         "intensity": intensity,
         "action_tag": str(priority.get("action_tag", "")) if priority else "",
     }
@@ -1244,10 +1347,12 @@ def _format_last(weight: float | None, reps: float | None) -> str:
     return f"{weight:g} x {reps:g}"
 
 
-def _format_target(weight: float | None, reps: float | None) -> str:
+def _format_target(weight: float | None, reps: object | None) -> str:
     if weight is None or reps is None:
         return f"{TARGET_SETS} x {TARGET_REPS_MIN}-{TARGET_REPS_MAX} @ target RIR"
-    return f"{weight:g} x {reps:g}"
+    if isinstance(reps, str):
+        return f"{weight:g} x {reps}"
+    return f"{weight:g} x {float(reps):g}"
 
 
 def _render_game_plan(plan: dict[str, object]) -> None:
@@ -1276,6 +1381,7 @@ def _render_game_plan(plan: dict[str, object]) -> None:
             _small_line("Target", f"{ex['sets']} x {ex['rep_range']} @ {ex['rir']} RIR")
             + _small_line("Last performance", _format_last(ex["last_weight"], ex["last_reps"]))
             + _small_line("Target today", _format_target(ex["target_weight"], ex["target_reps"]), "#e8890c")
+            + _small_line("Overload note", ex.get("overload_note", ""))
         )
         col.markdown(_card(title, body, "#e8890c" if ex["is_anchor"] else "#1e1e22"), unsafe_allow_html=True)
 
@@ -1357,6 +1463,8 @@ def render_coach_page(
     priority = build_todays_priority(df, checkins)
     rotation = dict(priority["rotation"])
     warnings = weekly_warnings(df, checkins)
+    fatigue = fatigue_risk_detector(df)
+    fatigue_high = str(fatigue.get("risk", "")).lower() == "high"
     plan = generate_game_plan(
         df,
         int(readiness["score"]),
@@ -1364,6 +1472,7 @@ def render_coach_page(
         rotation=rotation,
         severe_recovery=_has_severe_recovery_warning(warnings),
         priority=priority,
+        fatigue_high=fatigue_high,
     )
     progress = weekly_progress_tracker(df, checkins)
 

@@ -117,6 +117,14 @@ The Coach page uses daily targets from `config/profile.py`: 10,000 steps, 2,200 
 
 ---
 
+## Progressive Overload
+
+Coach uses a deterministic 2-set, 6-8 rep progression rule for recommended exercises. If the latest best working set hit 8 reps, the next target increases by 5 lbs for upper/accessory lifts or 10 lbs for major leg movements such as Leg Press and Hack Squat. Sets at 6-7 reps keep the same load and aim for 8; sets below 6 hold or reduce load. Readiness below 50 or high fatigue risk overrides progression and holds the load.
+
+Anchor lifts are configured by muscle group in `config/profile.py` and receive extra weight in strength retention and fatigue warnings.
+
+---
+
 ## Coach Split Rotation
 
 Coach follows the custom hybrid split in `config/profile.py`:

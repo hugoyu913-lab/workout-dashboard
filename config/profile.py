@@ -31,14 +31,18 @@ CUT_RATE_MAX: float = 0.01
 IDEAL_CUT_RATE_MIN: float = 0.005
 IDEAL_CUT_RATE_MAX: float = 0.008
 
-# Key compound lifts used for strength-retention tracking and game plan flagging
-ANCHOR_LIFTS: list[str] = [
-    "Incline Dumbbell Press",
-    "Chest Supported Row",
-    "Lat Pulldown",
-    "Leg Press",
-    "Hack Squat",
-    "Lateral Raise",
-    "Bicep Curl Machine",
-    "Triceps Pushdown",
+# Key lifts used for strength-retention tracking, warnings, and game plan flagging
+ANCHOR_LIFTS: dict[str, list[str]] = {
+    "Chest": ["Smith Machine Incline", "Pec Deck"],
+    "Back": ["Lat Pulldown", "Seated Cable Row"],
+    "Biceps": ["Dumbbell Curl", "Cable Curl"],
+    "Triceps": ["Tricep Pushdown", "Single Tricep Extension"],
+    "Legs": ["Leg Press", "Leg Curl"],
+}
+
+# Compatibility list for existing logic that expects list[str]
+ANCHOR_LIFT_LIST: list[str] = [
+    lift
+    for lifts in ANCHOR_LIFTS.values()
+    for lift in lifts
 ]

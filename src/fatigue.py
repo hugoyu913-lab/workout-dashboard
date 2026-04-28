@@ -4,7 +4,19 @@ from typing import Collection
 
 import pandas as pd
 
-from config.profile import MAX_MUSCLE_FREQ_PER_WEEK
+from config.profile import ANCHOR_LIFTS, MAX_MUSCLE_FREQ_PER_WEEK
+
+
+def _normalise_exercise(name: str) -> str:
+    return str(name).strip().lower()
+
+
+def _anchor_lift_names() -> set[str]:
+    if isinstance(ANCHOR_LIFTS, dict):
+        anchors = [lift for lifts in ANCHOR_LIFTS.values() for lift in lifts]
+    else:
+        anchors = list(ANCHOR_LIFTS)
+    return {_normalise_exercise(lift) for lift in anchors}
 
 
 def fatigue_risk_detector(
@@ -53,7 +65,9 @@ def fatigue_risk_detector(
     )
 
     same_weight_rep_drops: list[str] = []
+    anchor_rep_drops: list[str] = []
     regression_groups: dict[str, int] = {}
+    anchor_names = _anchor_lift_names()
     for exercise, group in session_best.groupby("Exercise"):
         ordered = group.sort_values("Date").reset_index(drop=True)
         if len(ordered) < 2:
@@ -69,16 +83,23 @@ def fatigue_risk_detector(
                 and abs(float(curr_row["Weight"]) - float(prev_row["Weight"])) < 0.01
                 and float(curr_row["Reps"]) < float(prev_row["Reps"])
             ):
-                same_weight_rep_drops.append(
+                message = (
                     f"{exercise}: reps dropped from {prev_row['Reps']:.0f} to "
                     f"{curr_row['Reps']:.0f} at {curr_row['Weight']:.0f} lbs."
                 )
+                if _normalise_exercise(exercise) in anchor_names:
+                    anchor_rep_drops.append(f"Anchor lift regression - {message}")
+                else:
+                    same_weight_rep_drops.append(message)
                 mg = str(curr_row.get("MuscleGroup", "unknown")).strip().lower() or "unknown"
                 regression_groups[mg] = regression_groups.get(mg, 0) + 1
 
     reasons: list[str] = []
+    if anchor_rep_drops:
+        reasons.extend(anchor_rep_drops[:3])
     if same_weight_rep_drops:
-        reasons.extend(same_weight_rep_drops[:3])
+        remaining = max(0, 3 - len(reasons))
+        reasons.extend(same_weight_rep_drops[:remaining])
 
     clustered_groups = [
         g for g, count in sorted(regression_groups.items())
@@ -116,7 +137,7 @@ def fatigue_risk_detector(
             )
             freq_penalty += 1
 
-    risk_points = len(same_weight_rep_drops) + len(clustered_groups) * 2 + freq_penalty
+    risk_points = len(anchor_rep_drops) * 2 + len(same_weight_rep_drops) + len(clustered_groups) * 2 + freq_penalty
     if risk_points >= 4:
         risk = "High"
         suggested_action = (

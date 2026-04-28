@@ -4,6 +4,20 @@ from typing import Collection
 
 import pandas as pd
 
+from config.profile import ANCHOR_LIFTS
+
+
+def _normalise_exercise(name: str) -> str:
+    return str(name).strip().lower()
+
+
+def _anchor_lift_names() -> set[str]:
+    if isinstance(ANCHOR_LIFTS, dict):
+        anchors = [lift for lifts in ANCHOR_LIFTS.values() for lift in lifts]
+    else:
+        anchors = list(ANCHOR_LIFTS)
+    return {_normalise_exercise(lift) for lift in anchors}
+
 
 def strength_retention_score(
     df: pd.DataFrame,
@@ -41,7 +55,8 @@ def strength_retention_score(
         return empty
 
     recent["Estimated1RM"] = recent["Weight"] * (1 + recent["Reps"] / 30)
-    statuses: list[str] = []
+    statuses: list[tuple[str, bool]] = []
+    anchor_names = _anchor_lift_names()
     for exercise, group in recent.groupby("Exercise"):
         ordered = group.sort_values("Date")
         dates = ordered["Date"].dt.date.unique()
@@ -60,23 +75,33 @@ def strength_retention_score(
             continue
 
         ratio = current_best / previous_best
+        is_anchor = _normalise_exercise(exercise) in anchor_names
         if ratio > 1.005:
-            statuses.append("Improved")
+            statuses.append(("Improved", is_anchor))
         elif ratio < 0.98:
-            statuses.append("Regressed")
+            statuses.append(("Regressed", is_anchor))
         else:
-            statuses.append("Maintained")
+            statuses.append(("Maintained", is_anchor))
 
     exercises_with_history = len(statuses)
     if exercises_with_history == 0:
         return empty
 
-    improved = statuses.count("Improved")
-    maintained = statuses.count("Maintained")
+    improved = sum(1 for status, _ in statuses if status == "Improved")
+    maintained = sum(1 for status, _ in statuses if status == "Maintained")
+    regressed = sum(1 for status, _ in statuses if status == "Regressed")
     improved_pct = improved / exercises_with_history * 100
     maintained_pct = maintained / exercises_with_history * 100
-    regressed_pct = statuses.count("Regressed") / exercises_with_history * 100
-    score = round((improved + maintained * 0.7) / exercises_with_history * 100)
+    regressed_pct = regressed / exercises_with_history * 100
+    weighted_total = sum(2.0 if is_anchor else 1.0 for _, is_anchor in statuses)
+    weighted_score = 0.0
+    for status, is_anchor in statuses:
+        weight = 2.0 if is_anchor else 1.0
+        if status == "Improved":
+            weighted_score += weight
+        elif status == "Maintained":
+            weighted_score += weight * 0.7
+    score = round(weighted_score / weighted_total * 100) if weighted_total else 0
 
     if score >= 85:
         interpretation = "Strength retention is excellent for a cut."
