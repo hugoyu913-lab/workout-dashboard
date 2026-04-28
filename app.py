@@ -148,6 +148,32 @@ h1, h2, h3, h4, h5, h6 {
     letter-spacing: 0.04em !important;
 }
 
+/* Top page navigation */
+[data-testid="stSegmentedControl"],
+[data-testid="stRadio"] {
+    background: #090909 !important;
+    border: 1px solid #1e1e22 !important;
+    border-radius: 3px !important;
+    padding: 0.35rem !important;
+    margin-bottom: 1.1rem !important;
+}
+
+[data-testid="stSegmentedControl"] button,
+[data-testid="stRadio"] label {
+    color: #888890 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.16em !important;
+    font-size: 0.66rem !important;
+    border-radius: 2px !important;
+}
+
+[data-testid="stSegmentedControl"] button[aria-pressed="true"],
+[data-testid="stRadio"] label:has(input:checked) {
+    background: rgba(232,137,12,0.16) !important;
+    border-color: rgba(232,137,12,0.45) !important;
+    color: #e8890c !important;
+}
+
 /* ── Buttons ─────────────────────────────── */
 .stButton > button {
     background: transparent !important;
@@ -344,6 +370,36 @@ _CHECKINS_PLACEHOLDER_TMPL = """
 
 def checkins_placeholder(title: str, hint: str = "") -> None:
     st.markdown(_CHECKINS_PLACEHOLDER_TMPL.format(title=title, hint=hint), unsafe_allow_html=True)
+
+
+def render_top_navigation() -> str:
+    pages = ["Coach", "Dashboard", "Grades"]
+    if hasattr(st, "segmented_control"):
+        return st.segmented_control(
+            "Page",
+            pages,
+            default="Coach",
+            label_visibility="collapsed",
+            key="top_page_nav",
+        ) or "Coach"
+
+    try:
+        return st.radio(
+            "Page",
+            pages,
+            index=0,
+            horizontal=True,
+            label_visibility="collapsed",
+            key="top_page_nav",
+        ) or "Coach"
+    except TypeError:
+        return st.radio(
+            "Page",
+            pages,
+            index=0,
+            label_visibility="collapsed",
+            key="top_page_nav",
+        ) or "Coach"
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -1146,9 +1202,7 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    st.sidebar.markdown("## Navigation")
-    page = st.sidebar.radio("", ["Coach", "Dashboard", "Grades"], label_visibility="collapsed")
-    st.sidebar.markdown("<div style='height:0.25rem'></div>", unsafe_allow_html=True)
+    page = render_top_navigation()
 
     spreadsheet_id = st.sidebar.text_input(
         "Google Spreadsheet ID",
