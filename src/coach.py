@@ -34,6 +34,14 @@ SPLIT_MUSCLES = [
     for split in TRAINING_SPLIT
 ]
 SPLIT_DAY_LABELS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+_ANCHOR_GROUP_TO_MUSCLE: dict[str, str] = {
+    "Chest": "chest",
+    "Back": "back",
+    "Biceps": "arms",
+    "Triceps": "arms",
+    "Legs": "legs",
+    "Shoulders": "shoulders",
+}
 
 
 def _today() -> date:
@@ -215,6 +223,13 @@ def compute_readiness(checkins: pd.DataFrame | None) -> dict[str, object]:
             delta = 10 if stress <= 3 else (-15 if stress >= 7 else 0)
             score += delta
             breakdown.append({"label": "Stress", "delta": delta, "note": f"{stress:.0f}/10"})
+
+        energy = pd.to_numeric(last.get("Energy"), errors="coerce")
+        if pd.notna(energy):
+            energy = float(energy)
+            delta = -15 if energy <= 3 else (10 if energy >= 7 else 0)
+            score += delta
+            breakdown.append({"label": "Energy", "delta": delta, "note": f"{energy:.0f}/10"})
 
     final_score = _clamp(score)
     label, subtitle, color = _score_label(final_score)
@@ -511,21 +526,56 @@ def build_todays_priority(
         priority_reason = f"Following rotation: {day_label} = {expected_split}."
         why = "This keeps your split on track while preserving strength during the cut."
 
-    if today_row is None or not rotation_known or not workout_data_sufficient:
+    try:
+        fatigue_result = fatigue_risk_detector(
+            df if df is not None else pd.DataFrame(), checkins=checkins
+        )
+        fatigue_risk = str(fatigue_result.get("risk", "Low"))
+    except Exception:
+        fatigue_risk = "Low"
+
+    if today_row is None:
         confidence_level = "Low"
-        if today_row is None:
-            confidence_reason = "No checkin row exists for today."
-        elif not rotation_known:
-            confidence_reason = "Split rotation could not be determined."
-        else:
-            confidence_reason = "Workout data is insufficient."
+        confidence_reason = "No checkin row exists for today."
+    elif not rotation_known:
+        confidence_level = "Low"
+        confidence_reason = "Split rotation could not be determined."
+    elif not workout_data_sufficient:
+        confidence_level = "Low"
+        confidence_reason = "Workout data is insufficient."
     elif len(filled_fields) == len(required_fields):
-        confidence_level = "High"
-        confidence_reason = "Today's sleep, energy, soreness, stress, and split rotation are available."
+        signals_agree = (readiness_score >= 60 and fatigue_risk != "High") or (
+            readiness_score < 40 and fatigue_risk == "High"
+        )
+        if signals_agree:
+            confidence_level = "High"
+            confidence_reason = "Checkins complete and readiness/fatigue signals agree."
+        else:
+            confidence_level = "Medium"
+            confidence_reason = (
+                f"Checkins complete but readiness ({readiness_score}) and fatigue "
+                f"({fatigue_risk}) signals conflict."
+            )
     else:
         confidence_level = "Medium"
         missing = ", ".join(field for field in required_fields if field not in filled_fields)
         confidence_reason = f"Rotation is known, but checkins are partial: missing {missing}."
+
+    anchor_callouts: list[str] = []
+    if rotation_muscles and df is not None:
+        try:
+            trends = _anchor_lift_trends(df)
+            watch_exercises = {t["exercise"] for t in trends if t.get("flag") == "Watch this lift"}
+            for group, lifts in ANCHOR_LIFTS.items():
+                muscle = _ANCHOR_GROUP_TO_MUSCLE.get(group, group.lower())
+                if muscle in rotation_muscles:
+                    for lift in lifts:
+                        if lift in watch_exercises and len(anchor_callouts) < 2:
+                            anchor_callouts.append(
+                                f"⚠ Anchor regression: {lift} — prioritize this lift today"
+                            )
+        except Exception:
+            pass
 
     return {
         "priority_title": priority_title,
@@ -539,6 +589,7 @@ def build_todays_priority(
         "expected_muscles": rotation_muscles,
         "rotation": rotation,
         "has_today_checkin": today_row is not None,
+        "anchor_callouts": anchor_callouts,
     }
 
 
@@ -656,6 +707,17 @@ def build_progressive_overload_targets(
         muscle_group = str(best.get("MuscleGroup", "")).strip().lower()
         increment = _load_increment(exercise_name, muscle_group)
 
+        # 2-session validation: look up prior session reps
+        session_dates = sorted(rows["Date"].dt.date.unique())
+        prev_reps: float | None = None
+        if len(session_dates) >= 2:
+            prev_date = session_dates[-2]
+            prev_session = rows[rows["Date"].dt.date == prev_date].sort_values(
+                ["Reps", "Weight"], ascending=[False, False]
+            )
+            if not prev_session.empty:
+                prev_reps = float(prev_session.iloc[0]["Reps"])
+
         if fatigue_high:
             recommended_weight = last_weight
             recommended_reps = f"{TARGET_REPS_MIN}-{TARGET_REPS_MAX}"
@@ -665,9 +727,14 @@ def build_progressive_overload_targets(
             recommended_reps = f"{TARGET_REPS_MIN}-{TARGET_REPS_MAX}"
             instruction = "Hold load today — readiness low"
         elif last_reps >= TARGET_REPS_MAX:
-            recommended_weight = last_weight + increment
-            recommended_reps = f"{TARGET_REPS_MIN}-{TARGET_REPS_MAX}"
-            instruction = "Hit top of rep range — increase load"
+            if prev_reps is not None and last_reps < prev_reps:
+                recommended_weight = last_weight
+                recommended_reps = f"{TARGET_REPS_MIN}-{TARGET_REPS_MAX}"
+                instruction = "Rep drop detected — hold load this session"
+            else:
+                recommended_weight = last_weight + increment
+                recommended_reps = f"{TARGET_REPS_MIN}-{TARGET_REPS_MAX}"
+                instruction = "Hit top of rep range — increase load"
         elif last_reps >= TARGET_REPS_MIN:
             recommended_weight = last_weight
             recommended_reps = f"{TARGET_REPS_MIN}-{TARGET_REPS_MAX}"
@@ -1268,6 +1335,10 @@ def _render_todays_priority(priority: dict[str, object]) -> None:
           <div style="font-size:0.62rem;color:#555560;margin-top:0.45rem;line-height:1.45;">
             Confidence: {escape(str(priority["confidence_reason"]))}
           </div>
+          {"".join(
+              f'<div style="font-size:0.72rem;color:#ef4444;margin-top:0.45rem;line-height:1.45;">{escape(c)}</div>'
+              for c in priority.get("anchor_callouts", [])
+          )}
         </div>
         """,
         unsafe_allow_html=True,
