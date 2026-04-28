@@ -90,6 +90,28 @@ html, body,
 [data-testid="stHeader"] { display: none !important; }
 #MainMenu, footer { visibility: hidden !important; }
 
+[data-testid="collapsedControl"] {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    z-index: 999999 !important;
+    position: fixed !important;
+    top: 0.75rem !important;
+    left: 0.75rem !important;
+}
+
+[data-testid="collapsedControl"] button,
+[data-testid="collapsedControl"] [role="button"] {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    color: #e8890c !important;
+    background: #111113 !important;
+    border: 1px solid #252528 !important;
+    border-radius: 3px !important;
+}
+
 * { font-family: 'IBM Plex Mono', monospace !important; }
 
 /* Restore Material Symbols font so Streamlit icons render correctly */
