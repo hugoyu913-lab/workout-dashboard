@@ -280,11 +280,13 @@ def build_next_workout(
     frequency_flags: list[dict[str, object]],
     fatigue: dict[str, object],
     retention: dict[str, object],
+    expected_split_from_rotation: list[str] | None = None,
 ) -> dict[str, object]:
     """Deterministic next-workout recommendation from pre-computed components."""
     fatigue_high = fatigue["risk"] == "High"
     fatigue_moderate = fatigue["risk"] == "Moderate"
     low_retention = float(retention.get("score", 0)) < 70 and int(retention.get("exercise_count", 0)) > 0
+    rotation_split = [str(group).lower() for group in (expected_split_from_rotation or []) if str(group).strip()]
 
     gap_groups = [str(row["muscle_group"]).lower() for row in frequency_flags]
     declining_groups = [
@@ -311,6 +313,17 @@ def build_next_workout(
                 "category": "Recovery",
                 "muscle_group": "Recovery",
             }]
+    elif rotation_split:
+        focus = _split_label(rotation_split)
+        reason = f"Following rotation: {focus} is the next scheduled split."
+        intensity = "Train at 0-1 RIR on stable movements. Stop before form breaks."
+        if fatigue_moderate or low_retention:
+            intensity = "Train at 1 RIR. Avoid grinding reps."
+        exercises = _recommended_exercise_rows(
+            rotation_split,
+            fatigue_sensitive=(fatigue_moderate or low_retention),
+            limit=3,
+        )
     elif target_groups:
         focus, split_groups = _best_split_focus(
             target_groups,

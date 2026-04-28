@@ -32,6 +32,7 @@ SPLIT_MUSCLES = [
     [muscle.lower() for muscle in split]
     for split in TRAINING_SPLIT
 ]
+SPLIT_DAY_LABELS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 
 
 def _today() -> date:
@@ -394,6 +395,11 @@ def build_split_rotation_status(df: pd.DataFrame | None, today: date | None = No
     expected_split = [] if rotation_complete else (SPLIT_MUSCLES[rotation_index] if SPLIT_MUSCLES else [])
     next_idx = 0 if rotation_complete else min(rotation_index + 1, max(len(SPLIT_MUSCLES) - 1, 0))
     next_split = SPLIT_MUSCLES[next_idx] if SPLIT_MUSCLES else []
+    expected_day_label = (
+        "Next Rotation"
+        if rotation_complete
+        else (SPLIT_DAY_LABELS[rotation_index] if rotation_index < len(SPLIT_DAY_LABELS) else f"Day {rotation_index + 1}")
+    )
 
     expected_calendar_slots = min(ref.weekday() + 1, len(SPLIT_MUSCLES))
     missed_sessions = max(0, expected_calendar_slots - expected_idx)
@@ -423,6 +429,9 @@ def build_split_rotation_status(df: pd.DataFrame | None, today: date | None = No
         "last_completed_split": "None" if last_completed is None else _split_label(last_completed),
         "last_completed_date": last_completed_day,
         "rotation_index": rotation_index,
+        "expected_day_label": expected_day_label,
+        "rotation_determined": bool(SPLIT_MUSCLES),
+        "rotation_complete": rotation_complete,
         "rotation_status": rotation_status,
         "missed_sessions": missed_sessions,
         "reason": reason,
@@ -564,21 +573,27 @@ def generate_game_plan(
     severe_recovery: bool = False,
 ) -> dict[str, object]:
     rotation_muscles = list(rotation.get("expected_muscles", [])) if rotation else []
-    if severe_recovery:
-        focus = "Recovery"
-        reason = "Regression or fatigue warning is active, so recovery takes priority over advancing the split."
-        split_muscles: list[str] = []
-    elif readiness_score < 30:
+    if rotation and rotation.get("rotation_complete") and not rotation_muscles:
+        rotation_muscles = list(rotation.get("next_muscles", []))
+    rotation_available = bool(rotation and rotation.get("rotation_determined") and rotation_muscles)
+    muscles: list[str] = []
+
+    if readiness_score < 30:
         focus = "Recovery"
         reason = "Readiness is below 30, so recovery protects strength retention."
+        split_muscles: list[str] = []
+    elif severe_recovery:
+        focus = "Recovery"
+        reason = "Regression or fatigue warning is active, so recovery takes priority over advancing the split."
         split_muscles = []
-    elif rotation_muscles:
-        focus = str(rotation.get("expected_today", _split_label(rotation_muscles)))
+    elif rotation_available:
+        focus = _split_label(rotation_muscles)
         split_muscles = rotation_muscles
+        expected_day = str(rotation.get("expected_day_label", "Rotation"))
         if readiness_score < 50:
-            reason = f"{focus} remains next in the split; keep it easy because readiness is low."
+            reason = f"Following rotation: {expected_day} = {focus}. Keep it easy because readiness is low."
         else:
-            reason = f"{focus} is the next uncompleted split in the Monday-anchored rotation."
+            reason = f"Following rotation: {expected_day} = {focus}."
     else:
         muscles = _target_muscles(checklist, readiness_score)
         focus, reason, split_muscles = _focus_for_muscles(muscles, readiness_score, checklist)
