@@ -40,10 +40,20 @@ def ensure_checkins(spreadsheet_id: str = DEFAULT_SPREADSHEET_ID) -> list[str]:
     )
     if worksheet is None:
         worksheet = spreadsheet.add_worksheet(title=CHECKINS_TITLE, rows=1000, cols=len(CHECKIN_COLUMNS))
-        worksheet.update("A1", [CHECKIN_COLUMNS])
+        worksheet.update(values=[CHECKIN_COLUMNS], range_name="A1")
         return CHECKIN_COLUMNS
 
-    existing = worksheet.row_values(1)
+    values = worksheet.get_all_values()
+    existing = values[0] if values else []
+    has_data_rows = any(any(str(cell).strip() for cell in row) for row in values[1:])
+
+    if not has_data_rows and existing != CHECKIN_COLUMNS:
+        if worksheet.col_count < len(CHECKIN_COLUMNS):
+            worksheet.add_cols(len(CHECKIN_COLUMNS) - worksheet.col_count)
+        end_col = chr(ord("A") + len(CHECKIN_COLUMNS) - 1)
+        worksheet.update(values=[CHECKIN_COLUMNS], range_name=f"A1:{end_col}1")
+        return CHECKIN_COLUMNS
+
     merged = list(existing)
     for header in CHECKIN_COLUMNS:
         if header not in merged:
@@ -53,7 +63,7 @@ def ensure_checkins(spreadsheet_id: str = DEFAULT_SPREADSHEET_ID) -> list[str]:
         if worksheet.col_count < len(merged):
             worksheet.add_cols(len(merged) - worksheet.col_count)
         end_col = chr(ord("A") + len(merged) - 1)
-        worksheet.update(f"A1:{end_col}1", [merged])
+        worksheet.update(values=[merged], range_name=f"A1:{end_col}1")
     return merged
 
 

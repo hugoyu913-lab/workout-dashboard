@@ -96,10 +96,10 @@ The app resolves credentials in this priority:
 Add a Google Sheet tab named exactly **`Checkins`** with these columns:
 
 ```
-Date | Bodyweight | Waist | Calories | Protein | Carbs | Fat | Steps | SleepHours | Energy | Soreness | Stress | Deload | Notes
+Date | Bodyweight | Calories | Protein | Carbs | Fat | Steps | SleepHours | Energy | Soreness | Stress | Deload | Notes
 ```
 
-- Numeric: `Bodyweight`, `Waist`, `Calories`, `Protein`, `Carbs`, `Fat`, `Steps`, `SleepHours`, `Energy`, `Soreness`, `Stress`.
+- Numeric: `Bodyweight`, `Calories`, `Protein`, `Carbs`, `Fat`, `Steps`, `SleepHours`, `Energy`, `Soreness`, `Stress`.
 - `Date` can be any parseable date, `Deload` accepts `TRUE`/`FALSE`, and `Notes` is preserved as text.
 - `Deload = TRUE` suppresses fatigue and regression warnings for that entire week.
 

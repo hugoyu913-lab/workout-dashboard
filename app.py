@@ -685,7 +685,7 @@ def render_bodyweight_recovery(checkins: pd.DataFrame, workout_df: pd.DataFrame)
             checkins_placeholder(
                 "Bodyweight Trend",
                 "Add a Google Sheet tab named 'Checkins' with columns: "
-                "Date, Bodyweight, Waist, Calories, Protein, Carbs, Fat, Steps, "
+                "Date, Bodyweight, Calories, Protein, Carbs, Fat, Steps, "
                 "SleepHours, Energy, Soreness, Stress, Deload, Notes",
             )
         with c2:

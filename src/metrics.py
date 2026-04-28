@@ -19,7 +19,6 @@ from src.retention import strength_retention_score  # noqa: F401
 CHECKIN_COLUMNS = [
     "Date",
     "Bodyweight",
-    "Waist",
     "Calories",
     "Protein",
     "Carbs",
@@ -55,7 +54,6 @@ def clean_checkins(raw: pd.DataFrame) -> pd.DataFrame:
 
     numeric_cols = [
         "Bodyweight",
-        "Waist",
         "Calories",
         "Protein",
         "Carbs",
