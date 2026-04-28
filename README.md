@@ -4,7 +4,7 @@ Streamlit dashboard backed by a Google Sheets workout log. Reads every worksheet
 
 The optional `Checkins` Google Sheet tab adds bodyweight trend (7-day rolling average), cut-pace classification, recovery signal tracking, and feeds the Cut Guardrails composite risk banner.
 
-The first page is **Coach**, a daily cutting-phase action plan. It combines Apple Health HRV/resting HR, optional Checkins recovery data, steps, nutrition, weekly muscle frequency, anchor-lift strength retention, and cut pace into a deterministic readiness score, daily target checklist, workout focus, exercise targets, weekly progress tracker, and warning/action cards.
+The first page is **Coach**, a daily cutting-phase action plan. It combines Checkins recovery data, steps, nutrition, weekly muscle frequency, anchor-lift strength retention, and cut pace into a deterministic readiness score, daily target checklist, workout focus, exercise targets, weekly progress tracker, and warning/action cards.
 
 The **Grades** page explains individual session grades. Select any logged workout date to see the grade, category score breakdown, what went well, what needs work, a cut-phase adjustment for next time, previous-session comparisons, and a per-exercise drilldown with status vs. the exercise's previous occurrence.
 
@@ -105,7 +105,7 @@ Date | Bodyweight | Calories | Protein | Carbs | Fat | Steps | SleepHours | Ener
 - `Date` can be any parseable date, `Deload` accepts `TRUE`/`FALSE`, and `Notes` is preserved as text.
 - `Deload = TRUE` suppresses fatigue and regression warnings for that entire week.
 
-If the tab is absent, the dashboard shows placeholder cards and continues normally. The Coach page also continues by falling back to Apple Health HRV/resting heart rate when those CSVs are available, then prompts you to add Checkins for the full readiness score.
+If the tab is absent, the dashboard shows placeholder cards and continues normally. Add the Checkins tab to unlock daily readiness, lifestyle targets, recovery summaries, nutrition guardrails, and cut pace tracking.
 
 To create or update the tab headers without overwriting existing rows:
 
@@ -136,13 +136,3 @@ Date, Workout, Exercise, MuscleGroup, Category, Set, Weight, Reps, Volume, Sourc
 ```
 
 Exercise names are standardised from `config/exercise_map.csv`. Unknown exercises fall back to a built-in map or become `other`.
-
----
-
-## Apple Health (optional, local only)
-
-```bash
-python scripts/parse_health.py   # expects data/export.xml
-```
-
-Writes daily CSVs to `data/health/` for correlation charts on the Correlations page. These files are excluded from git.

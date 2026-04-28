@@ -4,7 +4,7 @@
 
 This is a Streamlit workout analytics dashboard backed by a Google Sheets workout log. It reads every worksheet in a spreadsheet, parses a block-style workout log into a tidy dataframe, cleans and normalizes workout rows, then visualizes training volume, workout frequency, exercise PRs, estimated one-rep maxes, and muscle group volume.
 
-The app also includes Apple Health parsing support. A local `data/export.xml` can be parsed into daily CSV files under `data/health/`, then those health metrics can be joined with workout metrics for correlation charts such as body weight vs. strength, steps vs. training volume, sleep vs. performance, calories vs. next-day volume, and a broader correlation matrix.
+Lifestyle, recovery, nutrition, and readiness data come from the Google Sheets `Checkins` tab.
 
 ## Current Folder And File Structure
 
@@ -17,23 +17,10 @@ workout-dashboard/
   config/
     exercise_map.csv
     exercise_recommendations.csv
-  data/
-    export.xml
-    health/
-      active_calories.csv
-      body_weight.csv
-      hrv.csv
-      nutrition.csv
-      resting_hr.csv
-      sleep.csv
-      steps.csv
-      vo2max.csv
   scripts/
-    parse_health.py
     setup_checkins.py
   src/
     __init__.py
-    apple_health.py
     charts.py
     cleaner.py
     coach.py
@@ -109,24 +96,6 @@ Run the Streamlit dashboard:
 streamlit run app.py
 ```
 
-Optional Apple Health preprocessing:
-
-```powershell
-python scripts\parse_health.py
-```
-
-That script expects:
-
-```text
-data/export.xml
-```
-
-and writes daily metric CSVs into:
-
-```text
-data/health/
-```
-
 ## Current Working Features
 
 - Google Sheets client with Streamlit secrets support and local service-account JSON fallback.
@@ -160,16 +129,12 @@ Date, Workout, Exercise, MuscleGroup, Category, Set, Weight, Reps, Volume, Sourc
 - Workout comparison section that compares each selected-day exercise against its most recent previous occurrence and flags `Improved`, `Same`, or `Regressed`.
 - Grades page has a selectable session feedback system: grade/score breakdown, what went well, what needs improvement, next-session adjustment, best/weakest lift, previous-session comparison, and per-exercise drilldown with status vs previous occurrence.
 - Data tables for volume by exercise, PR tracker, and filtered raw rows.
-- Apple Health XML parsing into daily CSVs for steps, body weight, resting heart rate, HRV, active calories, sleep, nutrition, and VO2 max.
-- Health/workout correlation chart code for body composition, activity, nutrition, sleep, and full correlation matrix.
 - Dark Streamlit theme in `.streamlit/config.toml` plus custom CSS in `app.py`.
 
 ## Known Issues Or Limitations
 
-- `app.py` expects health dataframe columns such as `resting_hr`, `active_calories`, `hrv`, and `calories_in`, while `src/apple_health.py` writes columns such as `resting_hr_bpm`, `active_calories_kcal`, `hrv_ms`, and `calories_kcal`. The correlation page needs column-name alignment after the import issue is fixed.
 - `README.md` previously documented only `config/credentials.json`, but the current local key is `credentials.json`. Both are supported by the app.
 - `config/exercise_map.csv` now drives exercise standardization, muscle groups, and categories, but unmapped exercises still depend on the built-in fallback map or become `other`.
-- The Apple Health XML export is large and local (`data/export.xml`, about 354 MB). Re-parsing is a local preprocessing step and may be slow.
 - The repository currently contains local data and credential files. `.gitignore` excludes credentials, secrets, virtual environments, and Python cache folders, but already-present local files should still be handled carefully.
 - No automated test suite is present. `test_auth.py` is a manual connectivity check, not a pytest-style test.
 - Bare `m/d` date year inference starts from the current year minus one and increments on large backward month/day jumps. This is practical for a continuous log but may be wrong for unusual sheet ordering or older historical imports.
@@ -178,11 +143,10 @@ Date, Workout, Exercise, MuscleGroup, Category, Set, Weight, Reps, Volume, Sourc
 
 ## Recommended Next Upgrades
 
-1. Fix the Apple Health Streamlit integration by either renaming `render_sidebar_widget()` to `render_uploader()` or updating the import in `app.py`, then align health column names used by the correlation page.
-2. Continue expanding `config/exercise_map.csv` as new aliases appear in the workout log.
-3. Add a small pytest suite for sheet parsing, cleaning, metric calculations, and Apple Health column merging.
-4. Add a startup health check that reports which auth source is active and whether the current spreadsheet is reachable.
-5. Add a sample sanitized workbook or fixture data so the dashboard can be tested without private Google Sheets access.
-6. Add data validation warnings for unknown exercises, missing dates, nonnumeric weights/reps, and unusually high volumes.
-7. Add deployment notes for Streamlit Community Cloud or another host using `[gcp_service_account]` secrets.
-8. Add export/download options for cleaned workout data and computed PR tables.
+1. Continue expanding `config/exercise_map.csv` as new aliases appear in the workout log.
+2. Add a small pytest suite for sheet parsing, cleaning, metric calculations, Coach readiness, and grade feedback.
+3. Add a startup health check that reports which auth source is active and whether the current spreadsheet is reachable.
+4. Add a sample sanitized workbook or fixture data so the dashboard can be tested without private Google Sheets access.
+5. Add data validation warnings for unknown exercises, missing dates, nonnumeric weights/reps, and unusually high volumes.
+6. Add deployment notes for Streamlit Community Cloud or another host using `[gcp_service_account]` secrets.
+7. Add export/download options for cleaned workout data and computed PR tables.

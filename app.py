@@ -7,7 +7,6 @@ from html import escape
 import pandas as pd
 import streamlit as st
 
-from src.apple_health import render_uploader as health_uploader
 from src.charts import (
     bar_grade_distribution,
     bar_muscle_group_frequency,
@@ -16,8 +15,6 @@ from src.charts import (
     bar_checkin_macros,
     bar_checkin_sleep,
     bar_checkin_steps,
-    correlation_heatmap,
-    dual_axis_line,
     heatmap_weekly_muscle_volume,
     line_bodyweight_trend,
     line_session_quality,
@@ -25,7 +22,6 @@ from src.charts import (
     line_workout_frequency,
     scatter_1rm_timeline,
     scatter_estimated_1rm,
-    scatter_with_r2,
 )
 from src.cleaner import clean_workout_log
 from src.coach import render_coach_page
@@ -37,7 +33,6 @@ from src.metrics import (
     clean_checkins,
     build_session_feedback,
     daily_workout_detail,
-    daily_workout_metrics,
     daily_workout_summary,
     estimated_1rm_by_exercise,
     estimated_1rm_over_time,
@@ -308,34 +303,6 @@ _SECTION_TMPL = """
 
 def section_header(label: str) -> None:
     st.markdown(_SECTION_TMPL.format(label=label), unsafe_allow_html=True)
-
-
-_PLACEHOLDER_TMPL = """
-<div style="
-    background:#111113;border:1px solid #252528;border-left:3px solid #e8890c;
-    border-radius:3px;padding:2.5rem 1.5rem;text-align:center;
-    min-height:260px;display:flex;flex-direction:column;
-    align-items:center;justify-content:center;gap:0.8rem;
-">
-  <div style="font-size:1.8rem;opacity:0.18;color:#e8890c;">◈</div>
-  <div style="font-family:'Bebas Neue',cursive;font-size:1.05rem;
-              letter-spacing:0.14em;color:#e8890c;">
-    Connect Apple Health to Unlock
-  </div>
-  <div style="font-family:'IBM Plex Mono',monospace;font-size:0.65rem;
-              letter-spacing:0.08em;color:#333338;max-width:280px;">
-    {metric}
-  </div>
-  <div style="font-family:'IBM Plex Mono',monospace;font-size:0.58rem;
-              color:#222228;max-width:280px;margin-top:0.25rem;">
-    {hint}
-  </div>
-</div>
-"""
-
-
-def placeholder_card(metric: str, hint: str = "") -> None:
-    st.markdown(_PLACEHOLDER_TMPL.format(metric=metric, hint=hint), unsafe_allow_html=True)
 
 
 _CHECKINS_PLACEHOLDER_TMPL = """
@@ -851,121 +818,6 @@ def render_dashboard(df: pd.DataFrame, checkins: pd.DataFrame) -> None:
         st.dataframe(filtered, use_container_width=True, hide_index=True)
 
 
-_CORR_LABELS: dict[str, str] = {
-    "daily_volume": "Volume (lbs)",
-    "daily_best_e1rm": "Best e1RM (lbs)",
-    "daily_sets": "Sets",
-    "body_weight_lbs": "Body Weight",
-    "steps": "Daily Steps",
-    "resting_hr": "Resting HR",
-    "active_calories": "Active Cal",
-    "hrv": "HRV (ms)",
-    "sleep_hours": "Sleep Hrs",
-    "sleep_quality_pct": "Sleep Quality %",
-    "calories_in": "Cal Intake",
-}
-
-
-def _has_col(df: pd.DataFrame, col: str) -> bool:
-    return df is not None and col in df.columns and df[col].notna().any()
-
-
-def render_correlations(workout_df: pd.DataFrame, health_df: pd.DataFrame | None) -> None:
-    daily_w = daily_workout_metrics(workout_df)
-    daily_w["date"] = pd.to_datetime(daily_w["date"])
-
-    has_health = health_df is not None and not health_df.empty
-    if has_health:
-        merged = daily_w.merge(health_df, on="date", how="outer").sort_values("date").reset_index(drop=True)
-    else:
-        merged = daily_w.copy()
-
-    section_header("Body Composition vs Strength")
-    if _has_col(merged, "body_weight_lbs") and _has_col(merged, "daily_best_e1rm"):
-        st.plotly_chart(
-            dual_axis_line(merged, "date", "body_weight_lbs", "daily_best_e1rm",
-                           "Body Weight (lbs)", "Best e1RM (lbs)"),
-            use_container_width=True,
-        )
-    else:
-        placeholder_card(
-            "Body Weight vs Estimated 1RM over time",
-            "Upload Apple Health export to compare body weight trends with strength progress",
-        )
-
-    section_header("Activity & Nutrition Correlations")
-    left, right = st.columns(2)
-
-    with left:
-        if _has_col(merged, "steps") and _has_col(merged, "daily_volume"):
-            st.plotly_chart(
-                scatter_with_r2(merged, "steps", "daily_volume",
-                                "Daily Steps", "Training Volume (lbs)"),
-                use_container_width=True,
-            )
-        else:
-            placeholder_card("Daily Steps vs Workout Volume", "Requires step count data from Apple Health")
-
-    with right:
-        if _has_col(merged, "calories_in") and _has_col(merged, "daily_volume"):
-            cal = merged.set_index("date")["calories_in"].dropna()
-            vol = merged.set_index("date")["daily_volume"]
-            lag_rows = [
-                {"calories_in": c, "next_day_volume": vol.get(d + pd.Timedelta(days=1))}
-                for d, c in cal.items()
-            ]
-            lag_df = pd.DataFrame(lag_rows).dropna()
-            if not lag_df.empty:
-                st.plotly_chart(
-                    scatter_with_r2(lag_df, "calories_in", "next_day_volume",
-                                    "Caloric Intake (kcal)", "Next-Day Volume (lbs)"),
-                    use_container_width=True,
-                )
-            else:
-                placeholder_card("Caloric Intake vs Next-Day Volume", "No overlapping calorie + workout days found")
-        else:
-            placeholder_card(
-                "Caloric Intake vs Next-Day Volume (lagged)",
-                "Requires dietary calorie data synced to Apple Health (e.g. MyFitnessPal)",
-            )
-
-    section_header("Sleep vs Performance")
-    left, right = st.columns(2)
-
-    with left:
-        if _has_col(merged, "sleep_hours") and _has_col(merged, "daily_volume"):
-            sub = merged[["sleep_hours", "daily_volume"]].dropna()
-            st.plotly_chart(
-                scatter_with_r2(sub, "sleep_hours", "daily_volume",
-                                "Sleep Duration (hrs)", "Training Volume (lbs)"),
-                use_container_width=True,
-            )
-        else:
-            placeholder_card("Sleep Duration vs Training Volume", "Requires sleep data from Apple Health")
-
-    with right:
-        if _has_col(merged, "sleep_hours") and _has_col(merged, "daily_best_e1rm"):
-            sub = merged[["sleep_hours", "daily_best_e1rm"]].dropna()
-            st.plotly_chart(
-                scatter_with_r2(sub, "sleep_hours", "daily_best_e1rm",
-                                "Sleep Duration (hrs)", "Best e1RM (lbs)"),
-                use_container_width=True,
-            )
-        else:
-            placeholder_card("Sleep Duration vs Estimated 1RM", "Requires sleep data from Apple Health")
-
-    section_header("Full Correlation Matrix")
-    available = [c for c in _CORR_LABELS if c in merged.columns and merged[c].notna().sum() >= 4]
-
-    if len(available) >= 3:
-        corr_data = merged[available].rename(columns={c: _CORR_LABELS[c] for c in available})
-        st.plotly_chart(correlation_heatmap(corr_data.corr()), use_container_width=True)
-    else:
-        placeholder_card(
-            "Correlation Matrix — all metrics",
-            "Connect Apple Health to populate health columns and unlock the full heatmap",
-        )
-
 
 _GRADE_COLORS: dict[str, str] = {
     "A+": "#e8890c", "A": "#e8890c",
@@ -1274,10 +1126,8 @@ def main() -> None:
     )
 
     st.sidebar.markdown("## Navigation")
-    page = st.sidebar.radio("", ["Coach", "Dashboard", "Grades", "Correlations"], label_visibility="collapsed")
+    page = st.sidebar.radio("", ["Coach", "Dashboard", "Grades"], label_visibility="collapsed")
     st.sidebar.markdown("<div style='height:0.25rem'></div>", unsafe_allow_html=True)
-
-    health_df = health_uploader()
 
     spreadsheet_id = st.sidebar.text_input(
         "Google Spreadsheet ID",
@@ -1307,15 +1157,14 @@ def main() -> None:
         st.stop()
 
     if page == "Coach":
-        render_coach_page(df, checkins, health_df, spreadsheet_id)
+        render_coach_page(df, checkins, spreadsheet_id)
     elif page == "Dashboard":
         render_dashboard(df, checkins)
-    elif page == "Grades":
-        render_grades_page(df, checkins)
     else:
-        filtered = filter_frame(df)
-        render_correlations(filtered, health_df)
+        render_grades_page(df, checkins)
 
 
 if __name__ == "__main__":
     main()
+
+

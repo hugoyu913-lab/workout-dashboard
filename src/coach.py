@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from html import escape
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 import streamlit as st
@@ -146,50 +145,9 @@ def _score_label(score: int) -> tuple[str, str, str]:
     return "RECOVERY DAY", "skip or walk only", "#ef4444"
 
 
-def _health_metric_delta(
-    health_data: Any,
-    attr: str,
-    value_col: str,
-    label: str,
-    higher_is_better: bool,
-) -> dict[str, object] | None:
-    if health_data is None or not hasattr(health_data, "has") or not health_data.has(attr):
-        return None
-    data = getattr(health_data, attr, pd.DataFrame()).copy()
-    if data.empty or "date" not in data.columns or value_col not in data.columns:
-        return None
-    data["date"] = pd.to_datetime(data["date"], errors="coerce")
-    data[value_col] = pd.to_numeric(data[value_col], errors="coerce")
-    data = data.dropna(subset=["date", value_col]).sort_values("date")
-    if len(data) < 2:
-        return None
-    recent = float(data.iloc[-1][value_col])
-    avg7 = float(data.tail(7)[value_col].mean())
-    if avg7 <= 0:
-        return None
-    if higher_is_better:
-        pct = (recent - avg7) / avg7 * 100
-        delta = 20 if pct > 5 else (-20 if recent < avg7 else 0)
-        note = f"{recent:.0f} vs 7-day avg {avg7:.0f}"
-    else:
-        delta = -15 if recent - avg7 > 5 else 0
-        note = f"{recent:.0f} bpm vs 7-day avg {avg7:.0f}"
-    return {"label": label, "delta": delta, "note": note}
-
-
-def compute_readiness(checkins: pd.DataFrame | None, health_data: Any = None) -> dict[str, object]:
+def compute_readiness(checkins: pd.DataFrame | None) -> dict[str, object]:
     score = 60
     breakdown: list[dict[str, object]] = []
-
-    hrv = _health_metric_delta(health_data, "hrv", "hrv_ms", "HRV", True)
-    if hrv:
-        score += int(hrv["delta"])
-        breakdown.append(hrv)
-
-    rhr = _health_metric_delta(health_data, "resting_hr", "resting_hr_bpm", "Resting HR", False)
-    if rhr:
-        score += int(rhr["delta"])
-        breakdown.append(rhr)
 
     last = _latest_checkin(checkins)
     if last is not None:
@@ -236,7 +194,6 @@ def compute_readiness(checkins: pd.DataFrame | None, health_data: Any = None) ->
         "color": color,
         "breakdown": breakdown,
         "has_checkins": last is not None,
-        "has_health": bool(hrv or rhr),
     }
 
 
@@ -791,7 +748,7 @@ def _render_readiness(readiness: dict[str, object]) -> None:
     if not readiness["has_checkins"]:
         st.caption("Add Checkins tab for full readiness score")
     if not readiness["breakdown"]:
-        st.caption("No Checkins or Apple Health readiness inputs found. Baseline score shown.")
+        st.caption("No Checkins readiness inputs found. Baseline score shown.")
     else:
         cols = st.columns(min(5, len(readiness["breakdown"])))
         for col, item in zip(cols, readiness["breakdown"]):
@@ -914,10 +871,9 @@ def _render_warnings(warnings: list[dict[str, str]]) -> None:
 def render_coach_page(
     df: pd.DataFrame,
     checkins: pd.DataFrame | None = None,
-    health_data: Any = None,
     spreadsheet_id: str | None = None,
 ) -> None:
-    readiness = compute_readiness(checkins, health_data)
+    readiness = compute_readiness(checkins)
     checklist = weekly_muscle_checklist(df)
     plan = generate_game_plan(df, int(readiness["score"]), checklist)
     progress = weekly_progress_tracker(df, checkins)

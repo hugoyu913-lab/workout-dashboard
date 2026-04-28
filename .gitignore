@@ -4,7 +4,7 @@ config/credentials.json
 .streamlit/secrets.toml
 .env
 
-# Apple Health exports — large private files
+# Local private health exports
 data/export.xml
 data/health/
 
