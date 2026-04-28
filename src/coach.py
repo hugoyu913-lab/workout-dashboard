@@ -61,11 +61,13 @@ def _normalise_exercise(name: str) -> str:
 
 
 def _is_anchor(exercise: str) -> bool:
+    return _normalise_exercise(exercise) in {_normalise_exercise(x) for x in _anchor_lift_names()}
+
+
+def _anchor_lift_names() -> list[str]:
     if isinstance(ANCHOR_LIFTS, dict):
-        anchors = [lift for lifts in ANCHOR_LIFTS.values() for lift in lifts]
-    else:
-        anchors = list(ANCHOR_LIFTS)
-    return _normalise_exercise(exercise) in {_normalise_exercise(x) for x in anchors}
+        return [str(lift) for lifts in ANCHOR_LIFTS.values() for lift in lifts]
+    return [str(lift) for lift in ANCHOR_LIFTS]
 
 
 def _prep_workouts(df: pd.DataFrame | None) -> pd.DataFrame:
@@ -1341,6 +1343,121 @@ def _render_checklist(checklist: list[dict[str, object]]) -> None:
             col.markdown(_card(str(row["muscle_group"]), body, str(row["color"])), unsafe_allow_html=True)
 
 
+def _anchor_session_bests(work: pd.DataFrame, exercise: str) -> pd.DataFrame:
+    if work.empty:
+        return pd.DataFrame()
+    rows = work[work["Exercise"].astype(str).str.lower().str.strip() == _normalise_exercise(exercise)]
+    rows = rows.dropna(subset=["Date", "Weight", "Reps", "Estimated1RM"]).copy()
+    if rows.empty:
+        return pd.DataFrame()
+    rows["SessionDate"] = rows["Date"].dt.date
+    bests = (
+        rows.sort_values(
+            ["SessionDate", "Estimated1RM", "Weight", "Reps"],
+            ascending=[True, False, False, False],
+        )
+        .groupby("SessionDate", as_index=False)
+        .first()
+        .sort_values("SessionDate")
+    )
+    return bests
+
+
+def _consecutive_same_weight(weights: list[float]) -> int:
+    if not weights:
+        return 0
+    streak = 1
+    last = weights[-1]
+    for weight in reversed(weights[:-1]):
+        if abs(weight - last) >= 0.01:
+            break
+        streak += 1
+    return streak
+
+
+def _weight_regressed_twice(weights: list[float]) -> bool:
+    if len(weights) < 3:
+        return False
+    drops = 0
+    for previous, current in zip(weights[-3:-1], weights[-2:]):
+        if current < previous - 0.01:
+            drops += 1
+        else:
+            drops = 0
+        if drops >= 2:
+            return True
+    return False
+
+
+def _anchor_lift_trends(df: pd.DataFrame | None) -> list[dict[str, object]]:
+    work = _prep_workouts(df)
+    trends: list[dict[str, object]] = []
+    for exercise in _anchor_lift_names():
+        sessions = _anchor_session_bests(work, exercise).tail(4)
+        if sessions.empty:
+            trends.append({
+                "exercise": exercise,
+                "last": "No sessions logged",
+                "trend": "→",
+                "flag": "",
+                "color": "#555560",
+            })
+            continue
+
+        latest = sessions.iloc[-1]
+        last_weight = float(latest["Weight"])
+        last_reps = float(latest["Reps"])
+        recent_scores = [float(value) for value in sessions["Estimated1RM"].tolist()]
+        recent_weights = [float(value) for value in sessions["Weight"].tolist()]
+
+        trend = "→"
+        if len(recent_scores) >= 2:
+            prior_best = max(recent_scores[:-1])
+            if recent_scores[-1] > prior_best + 0.01:
+                trend = "↑"
+            elif recent_scores[-1] < recent_scores[-2] - 0.01:
+                trend = "↓"
+
+        ready = _consecutive_same_weight(recent_weights) >= 3 and last_reps >= 8
+        watch = _weight_regressed_twice(recent_weights)
+        if watch:
+            flag = "Watch this lift"
+            color = "#ef4444"
+        elif ready:
+            flag = "Ready to progress"
+            color = "#22c55e"
+        elif trend == "↓":
+            flag = "Monitor"
+            color = "#f59e0b"
+        else:
+            flag = "Stable"
+            color = "#e8890c" if trend == "↑" else "#c8c8cc"
+
+        trends.append({
+            "exercise": exercise,
+            "last": f"{last_weight:g} x {last_reps:g}",
+            "trend": trend,
+            "flag": flag,
+            "color": color,
+        })
+    return trends
+
+
+def render_anchor_lift_trends(df: pd.DataFrame | None) -> None:
+    st.markdown("### ANCHOR LIFT TRENDS")
+    trends = _anchor_lift_trends(df)
+    for start in range(0, len(trends), 3):
+        cols = st.columns(3)
+        for col, row in zip(cols, trends[start:start + 3]):
+            flag = str(row["flag"])
+            body = (
+                _small_line("Last", row["last"])
+                + _small_line("Trend", row["trend"], str(row["color"]))
+                + (_small_line("Flag", flag, str(row["color"])) if flag else _small_line("Flag", "No logged sessions", "#555560"))
+            )
+            col.markdown(_card(str(row["exercise"]), body, str(row["color"])), unsafe_allow_html=True)
+
+
 def _format_last(weight: float | None, reps: float | None) -> str:
     if weight is None or reps is None:
         return "No prior logged performance"
@@ -1486,6 +1603,8 @@ def render_coach_page(
     _render_today_targets(checkins, spreadsheet_id)
     st.divider()
     _render_checklist(checklist)
+    st.divider()
+    render_anchor_lift_trends(df)
     st.divider()
     _render_game_plan(plan)
     st.divider()
