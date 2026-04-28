@@ -99,7 +99,7 @@ streamlit run app.py
 ## Current Working Features
 
 - Google Sheets client with Streamlit secrets support and local service-account JSON fallback.
-- Coach page is the first navigation item. It provides a deterministic daily cutting checklist with readiness scoring, today's lifestyle targets, muscle-group frequency cards, a recommended Push/Pull/Legs/Arms/Recovery focus, 2-set exercise targets, weekly progress bars, and warning/action cards.
+- Coach page is the first navigation item. It provides a deterministic daily cutting checklist with readiness scoring, today's lifestyle targets, a Monday-anchored split rotation tracker, muscle-group frequency cards, a recommended custom split or Recovery focus, 2-set exercise targets, weekly progress bars, and warning/action cards.
 - Workbook-wide worksheet loading through `gspread`.
 - Parsing of the current block-header sheet format where each session starts with a row like `Workout Date | Weight | Reps`.
 - Bare `m/d` date handling with inferred year rollovers.
@@ -116,11 +116,11 @@ Date, Workout, Exercise, MuscleGroup, Category, Set, Weight, Reps, Volume, Sourc
 - Dashboard filters for date range, muscle group, exercise, and source sheet.
 - KPI cards for total volume, workouts, logged sets, and exercise count.
 - Charts for weekly volume, workout frequency, top exercises, estimated 1RM, muscle group volume, weekly muscle group heatmap, and PR timeline.
-- Rule-based weekly insight panel tuned for high-intensity cutting: progression scores, progressing/stalled/declining exercise flags, muscle-group frequency gaps, fatigue/regression warnings, weekly training score, push/pull/legs balance, and suggested focus for the next week. This is local deterministic logic, not an API call.
+- Rule-based weekly insight panel tuned for high-intensity cutting: progression scores, progressing/stalled/declining exercise flags, muscle-group frequency gaps, fatigue/regression warnings, weekly training score, custom split balance, and suggested focus for the next week. This is local deterministic logic, not an API call.
 - Strength Retention Score section that classifies recent repeated exercises as `Improved`, `Maintained`, or `Regressed` across the last 2-3 weeks and normalizes the result to a 0-100 score.
 - Fatigue Risk Detector that flags same-weight rep drops, repeated regressions in the same muscle group, and weeks above the normal 5-6 training sessions, then returns `Low`, `Moderate`, or `High` risk with reasons and a suggested action.
 - Suggested Exercises module backed by `config/exercise_recommendations.csv`; it recommends 2-3 high-priority movements per affected muscle group for frequency gaps, regressions, and recovery-sensitive substitutions.
-- Next Workout Recommendation module that combines weekly insights, fatigue risk, strength retention, frequency gaps, and suggested exercises to choose a deterministic Push, Pull, Legs, Upper, or Recovery session.
+- Next Workout Recommendation module that combines weekly insights, fatigue risk, strength retention, frequency gaps, and suggested exercises to choose a deterministic custom split or Recovery session.
 - Optional `Checkins` Google Sheet tab support for bodyweight, calories, protein, carbs, fat, steps, sleep, energy, soreness, stress, deload flags, and notes. Checkins feeds 7-day bodyweight average, weekly weight-loss rate, nutrition guardrails, Coach readiness inputs, daily targets, lifestyle summaries, and recovery warnings.
 - `scripts/setup_checkins.py` creates the `Checkins` worksheet if missing and appends any missing required headers without overwriting existing daily rows.
 - Bodyweight & Recovery includes 30-day Checkins charts for steps vs 10k goal, sleep vs 8h target, and macro adherence for protein/carbs/fat.

@@ -321,6 +321,115 @@ def _split_label(muscles: list[str]) -> str:
     return " + ".join(muscle.title() for muscle in muscles)
 
 
+def _match_split(muscles: set[str]) -> tuple[int | None, list[str] | None, float]:
+    if not muscles:
+        return None, None, 0.0
+    best_idx: int | None = None
+    best_split: list[str] | None = None
+    best_score = 0.0
+    for idx, split in enumerate(SPLIT_MUSCLES):
+        split_set = set(split)
+        overlap = len(muscles & split_set)
+        if overlap == 0:
+            score = 0.0
+        else:
+            union = len(muscles | split_set)
+            score = overlap / union
+            if split_set == muscles:
+                score += 0.25
+        if score > best_score:
+            best_idx = idx
+            best_split = split
+            best_score = score
+    return best_idx, best_split, best_score
+
+
+def _session_muscles_by_date(work: pd.DataFrame, start: date, end: date) -> dict[date, set[str]]:
+    if work.empty:
+        return {}
+    rows = work[
+        (work["Date"].dt.date >= start)
+        & (work["Date"].dt.date <= end)
+        & (work["MuscleGroup"].isin(MUSCLE_GROUPS))
+    ].copy()
+    if rows.empty:
+        return {}
+    grouped = rows.groupby(rows["Date"].dt.date)["MuscleGroup"].apply(lambda s: set(s.dropna().astype(str)))
+    return {day: muscles for day, muscles in grouped.items()}
+
+
+def build_split_rotation_status(df: pd.DataFrame | None, today: date | None = None) -> dict[str, object]:
+    ref = today or _today()
+    week_start, _ = _week_bounds(ref)
+    work = _prep_workouts(df)
+    sessions = _session_muscles_by_date(work, week_start, ref)
+    expected_idx = 0
+    last_completed: list[str] | None = None
+    last_completed_day: date | None = None
+    completed_indices: set[int] = set()
+    out_of_rotation: dict[str, object] | None = None
+
+    for session_day in sorted(sessions):
+        if expected_idx >= len(SPLIT_MUSCLES):
+            break
+        muscles = sessions[session_day]
+        matched_idx, matched_split, score = _match_split(muscles)
+        expected_split = SPLIT_MUSCLES[expected_idx]
+        if matched_idx == expected_idx and score > 0:
+            completed_indices.add(expected_idx)
+            last_completed = matched_split
+            last_completed_day = session_day
+            expected_idx += 1
+        elif matched_split is not None and out_of_rotation is None:
+            out_of_rotation = {
+                "day": session_day,
+                "actual": matched_split,
+                "expected": expected_split,
+            }
+            last_completed = matched_split
+            last_completed_day = session_day
+
+    rotation_complete = bool(SPLIT_MUSCLES) and expected_idx >= len(SPLIT_MUSCLES)
+    rotation_index = 0 if rotation_complete else min(expected_idx, max(len(SPLIT_MUSCLES) - 1, 0))
+    expected_split = [] if rotation_complete else (SPLIT_MUSCLES[rotation_index] if SPLIT_MUSCLES else [])
+    next_idx = 0 if rotation_complete else min(rotation_index + 1, max(len(SPLIT_MUSCLES) - 1, 0))
+    next_split = SPLIT_MUSCLES[next_idx] if SPLIT_MUSCLES else []
+
+    expected_calendar_slots = min(ref.weekday() + 1, len(SPLIT_MUSCLES))
+    missed_sessions = max(0, expected_calendar_slots - expected_idx)
+    if ref.weekday() < len(SPLIT_MUSCLES) and ref not in sessions and missed_sessions > 0:
+        missed_sessions = max(0, missed_sessions - 1)
+
+    if out_of_rotation is not None:
+        rotation_status = "Out of Rotation"
+        actual = _split_label(list(out_of_rotation["actual"]))
+        expected = _split_label(list(out_of_rotation["expected"]))
+        reason = f"{actual} was logged when {expected} was expected."
+    elif missed_sessions > 0:
+        rotation_status = "Missed"
+        reason = f"{_split_label(expected_split)} remains next because skipped days do not advance the split."
+    elif rotation_complete:
+        rotation_status = "On Track"
+        reason = f"This week's rotation is complete; {_split_label(next_split)} starts the next rotation."
+    else:
+        rotation_status = "On Track"
+        reason = f"{_split_label(expected_split)} is the next uncompleted split in the rotation."
+
+    return {
+        "expected_today": "Rotation Complete" if rotation_complete else _split_label(expected_split),
+        "expected_muscles": expected_split,
+        "next_split": _split_label(next_split),
+        "next_muscles": next_split,
+        "last_completed_split": "None" if last_completed is None else _split_label(last_completed),
+        "last_completed_date": last_completed_day,
+        "rotation_index": rotation_index,
+        "rotation_status": rotation_status,
+        "missed_sessions": missed_sessions,
+        "reason": reason,
+        "completed_indices": completed_indices,
+    }
+
+
 def _split_score(split: list[str], checklist: list[dict[str, object]], target_muscles: list[str]) -> float:
     by_muscle = {str(row["muscle_key"]): row for row in checklist}
     target_set = set(target_muscles)
@@ -447,9 +556,32 @@ def _exercise_targets(df: pd.DataFrame | None, muscles: list[str], readiness: in
     return selected
 
 
-def generate_game_plan(df: pd.DataFrame | None, readiness_score: int, checklist: list[dict[str, object]]) -> dict[str, object]:
-    muscles = [] if readiness_score < 30 else _target_muscles(checklist, readiness_score)
-    focus, reason, split_muscles = _focus_for_muscles(muscles, readiness_score, checklist)
+def generate_game_plan(
+    df: pd.DataFrame | None,
+    readiness_score: int,
+    checklist: list[dict[str, object]],
+    rotation: dict[str, object] | None = None,
+    severe_recovery: bool = False,
+) -> dict[str, object]:
+    rotation_muscles = list(rotation.get("expected_muscles", [])) if rotation else []
+    if severe_recovery:
+        focus = "Recovery"
+        reason = "Regression or fatigue warning is active, so recovery takes priority over advancing the split."
+        split_muscles: list[str] = []
+    elif readiness_score < 30:
+        focus = "Recovery"
+        reason = "Readiness is below 30, so recovery protects strength retention."
+        split_muscles = []
+    elif rotation_muscles:
+        focus = str(rotation.get("expected_today", _split_label(rotation_muscles)))
+        split_muscles = rotation_muscles
+        if readiness_score < 50:
+            reason = f"{focus} remains next in the split; keep it easy because readiness is low."
+        else:
+            reason = f"{focus} is the next uncompleted split in the Monday-anchored rotation."
+    else:
+        muscles = _target_muscles(checklist, readiness_score)
+        focus, reason, split_muscles = _focus_for_muscles(muscles, readiness_score, checklist)
     if readiness_score >= 70:
         intensity = "Work to 0-1 RIR - push the last set"
     elif readiness_score >= 50:
@@ -856,6 +988,64 @@ def _render_checkins_status(checkins: pd.DataFrame | None) -> None:
     )
 
 
+def _render_split_rotation(rotation: dict[str, object]) -> None:
+    st.markdown("### SPLIT ROTATION TRACKER")
+    status = str(rotation["rotation_status"])
+    color = "#22c55e" if status == "On Track" else ("#ef4444" if status == "Out of Rotation" else "#f59e0b")
+    last_date = rotation.get("last_completed_date")
+    last_label = str(rotation["last_completed_split"])
+    if last_date is not None:
+        last_label = f"{last_label} ({pd.Timestamp(last_date).strftime('%Y-%m-%d')})"
+    body = (
+        _small_line("Expected Today", rotation["expected_today"], "#e8890c")
+        + _small_line("Last Completed", last_label)
+        + _small_line("Next Up", rotation["next_split"])
+        + _small_line("Status", status, color)
+        + _small_line("Reason", rotation["reason"])
+    )
+    st.markdown(_card("Split Rotation Tracker", body, color), unsafe_allow_html=True)
+
+    day_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    completed = set(rotation.get("completed_indices", set()))
+    current = int(rotation.get("rotation_index", 0))
+    today_slot = min(_today().weekday(), len(SPLIT_MUSCLES) - 1)
+    chips: list[str] = []
+    for idx, split in enumerate(SPLIT_MUSCLES[:6]):
+        label = day_labels[idx] if idx < len(day_labels) else f"Day {idx + 1}"
+        split_label = _split_label(split)
+        if idx in completed:
+            border = "#22c55e"
+            bg = "rgba(34,197,94,0.12)"
+            text = "#d8f5df"
+        elif idx == current:
+            border = "#e8890c"
+            bg = "rgba(232,137,12,0.16)"
+            text = "#e8890c"
+        elif idx < today_slot:
+            border = "#ef4444"
+            bg = "rgba(239,68,68,0.10)"
+            text = "#fca5a5"
+        else:
+            border = "#333338"
+            bg = "#0d0d0f"
+            text = "#777782"
+        chips.append(
+            f"""
+            <div style="border:1px solid {border};background:{bg};border-radius:3px;
+                        padding:0.45rem 0.65rem;min-width:145px;">
+              <div style="font-size:0.58rem;letter-spacing:0.16em;color:#555560;">{label}</div>
+              <div style="font-size:0.66rem;color:{text};margin-top:0.2rem;">{escape(split_label)}</div>
+            </div>
+            """
+        )
+    st.markdown(
+        "<div style='display:flex;gap:0.45rem;flex-wrap:wrap;margin-top:0.75rem;'>"
+        + "".join(chips)
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+
+
 def _render_checklist(checklist: list[dict[str, object]]) -> None:
     st.markdown("### MUSCLE GROUP CHECKLIST")
     for row_group in (checklist[:3], checklist[3:]):
@@ -968,6 +1158,15 @@ def _render_warnings(warnings: list[dict[str, str]]) -> None:
             col.markdown(_card(f"{warning['icon']} - {warning['title']}", body, "#ef4444"), unsafe_allow_html=True)
 
 
+def _has_severe_recovery_warning(warnings: list[dict[str, str]]) -> bool:
+    severe_terms = ("regressed twice", "three low-grade sessions")
+    for warning in warnings:
+        title = str(warning.get("title", "")).lower()
+        if any(term in title for term in severe_terms):
+            return True
+    return False
+
+
 def render_coach_page(
     df: pd.DataFrame,
     checkins: pd.DataFrame | None = None,
@@ -975,12 +1174,21 @@ def render_coach_page(
 ) -> None:
     readiness = compute_readiness(checkins)
     checklist = weekly_muscle_checklist(df)
-    plan = generate_game_plan(df, int(readiness["score"]), checklist)
-    progress = weekly_progress_tracker(df, checkins)
+    rotation = build_split_rotation_status(df)
     warnings = weekly_warnings(df, checkins)
+    plan = generate_game_plan(
+        df,
+        int(readiness["score"]),
+        checklist,
+        rotation=rotation,
+        severe_recovery=_has_severe_recovery_warning(warnings),
+    )
+    progress = weekly_progress_tracker(df, checkins)
 
     _render_readiness(readiness)
     _render_checkins_status(checkins)
+    st.divider()
+    _render_split_rotation(rotation)
     st.divider()
     _render_today_targets(checkins, spreadsheet_id)
     st.divider()

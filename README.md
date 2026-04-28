@@ -4,7 +4,7 @@ Streamlit dashboard backed by a Google Sheets workout log. Reads every worksheet
 
 The optional `Checkins` Google Sheet tab adds bodyweight trend (7-day rolling average), cut-pace classification, recovery signal tracking, and feeds the Cut Guardrails composite risk banner.
 
-The first page is **Coach**, a daily cutting-phase action plan. It combines Checkins recovery data, steps, nutrition, weekly muscle frequency, anchor-lift strength retention, and cut pace into a deterministic readiness score, daily target checklist, workout focus, exercise targets, weekly progress tracker, and warning/action cards.
+The first page is **Coach**, a daily cutting-phase action plan. It combines Checkins recovery data, steps, nutrition, weekly muscle frequency, anchor-lift strength retention, cut pace, and the Monday-anchored custom split rotation into a deterministic readiness score, daily target checklist, workout focus, exercise targets, weekly progress tracker, and warning/action cards.
 
 The **Grades** page explains individual session grades. Select any logged workout date to see the grade, category score breakdown, what went well, what needs work, a cut-phase adjustment for next time, previous-session comparisons, and a per-exercise drilldown with status vs. the exercise's previous occurrence.
 
@@ -114,6 +114,23 @@ python scripts/setup_checkins.py
 ```
 
 The Coach page uses daily targets from `config/profile.py`: 10,000 steps, 2,200 calories, 180g protein, 180g carbs, 60g fat, and 8h sleep. The Bodyweight & Recovery section also charts 30-day steps, sleep, and macro adherence from Checkins.
+
+---
+
+## Coach Split Rotation
+
+Coach follows the custom hybrid split in `config/profile.py`:
+
+```
+Mon: Chest + Back
+Tue: Shoulders + Arms
+Wed: Legs
+Thu: Chest + Arms
+Fri: Back + Shoulders
+Sat: Legs
+```
+
+The rotation starts every Monday and only advances when the expected split is completed. Skipped days do not advance the rotation, so the next training day keeps the missed split as the expected workout. Today's Game Plan prioritizes that expected split unless readiness is below 30 or a severe fatigue/regression warning calls for recovery.
 
 ---
 
