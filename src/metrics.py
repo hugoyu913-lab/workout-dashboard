@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 import pandas as pd
 
 from config.profile import (
@@ -764,6 +766,205 @@ def grade_session(df: pd.DataFrame, session_date=None) -> dict[str, object]:
         "session_found": True,
         "exercise_results": exercise_results,
     }
+
+
+def _session_dates(df: pd.DataFrame) -> list[date]:
+    if df.empty or "Date" not in df.columns:
+        return []
+    work = df.dropna(subset=["Date"]).copy()
+    work["Date"] = pd.to_datetime(work["Date"], errors="coerce")
+    work = work.dropna(subset=["Date"])
+    return sorted(work["Date"].dt.date.unique())
+
+
+def _previous_session_date(df: pd.DataFrame, selected_date: object) -> date | None:
+    target = pd.to_datetime(selected_date, errors="coerce")
+    if pd.isna(target):
+        return None
+    previous = [d for d in _session_dates(df) if d < target.date()]
+    return previous[-1] if previous else None
+
+
+def _format_lift(lift: dict | None, fallback: str = "None") -> str:
+    if not lift:
+        return fallback
+    if "e1rm" in lift:
+        return f"{lift['exercise']} - e1RM {lift['e1rm']} lbs"
+    if "delta_pct" in lift:
+        return f"{lift['exercise']} - {lift['delta_pct']:+.1f}% vs previous"
+    return str(lift.get("exercise", fallback))
+
+
+def build_session_feedback(df: pd.DataFrame, selected_date) -> dict[str, object]:
+    """Build deterministic cut-phase feedback for one selected training session."""
+    g = grade_session(df, selected_date)
+    if not g["session_found"]:
+        return {
+            "session_found": False,
+            "overall_grade": "N/A",
+            "numeric_score": 0.0,
+            "category_scores": {},
+            "what_went_well": ["No session data found for this date."],
+            "what_needs_improvement": [],
+            "recommended_adjustment": "Select a logged workout date.",
+            "best_lift": None,
+            "weakest_lift": None,
+            "muscle_groups_trained": [],
+            "total_volume": 0.0,
+            "total_sets": 0,
+            "previous_comparison": {},
+        }
+
+    category_scores = {
+        "consistency": float(g["consistency_score"]),
+        "strength": float(g["strength_score"]),
+        "rep_range": float(g["rep_adherence_score"]),
+        "volume": float(g["volume_score"]),
+    }
+
+    what_went_well: list[str] = []
+    what_needs_improvement: list[str] = []
+
+    if category_scores["consistency"] >= 75:
+        what_went_well.append("Set execution was consistent across the workout.")
+    if category_scores["strength"] >= 75:
+        what_went_well.append("Strength output held close to recent baseline, which supports muscle retention while leaning out.")
+    if category_scores["rep_range"] >= 75:
+        what_went_well.append(f"Most sets stayed in the target {TARGET_REPS_MIN}-{TARGET_REPS_MAX} rep range.")
+    if category_scores["volume"] >= 75:
+        what_went_well.append("Training volume was in line with recent sessions without adding unnecessary cut-phase fatigue.")
+
+    fatigue_detected = bool(g["worst_lift"]) or category_scores["strength"] < 60
+    if category_scores["strength"] < 70:
+        what_needs_improvement.append("Strength output was below recent baseline.")
+    if category_scores["rep_range"] < 70:
+        what_needs_improvement.append(f"Several sets fell outside the target {TARGET_REPS_MIN}-{TARGET_REPS_MAX} rep range.")
+    if category_scores["volume"] < 70:
+        what_needs_improvement.append("Training volume was below your recent average.")
+    if category_scores["consistency"] < 70:
+        what_needs_improvement.append("Set completion was below your normal session consistency.")
+    if fatigue_detected:
+        what_needs_improvement.append("Performance drop may reflect fatigue; consider 1-2 RIR next session.")
+
+    if not what_went_well:
+        what_went_well.append("Session was logged clearly enough to evaluate strength retention and workload.")
+    if not what_needs_improvement:
+        what_needs_improvement.append("No major weakness detected; keep the cut-phase setup stable.")
+
+    if fatigue_detected or category_scores["strength"] < 70:
+        recommended = "Prioritize recovery and use 1-2 RIR next time before adding volume."
+    elif category_scores["rep_range"] < 70:
+        recommended = f"Keep 2 hard working sets, but choose loads that keep most sets in the {TARGET_REPS_MIN}-{TARGET_REPS_MAX} rep range."
+    elif category_scores["volume"] < 70:
+        recommended = "Match your normal 2 working sets per exercise before considering extra work."
+    else:
+        recommended = "Repeat the structure and push 0-1 RIR when recovered; do not add volume unless performance stays stable."
+
+    prev_date = _previous_session_date(df, selected_date)
+    previous_comparison: dict[str, object] = {
+        "previous_date": prev_date,
+        "volume_delta": None,
+        "sets_delta": None,
+        "score_delta": None,
+        "grade_delta": None,
+        "improved_categories": [],
+        "declined_categories": [],
+    }
+    if prev_date is not None:
+        prev = grade_session(df, prev_date)
+        if prev["session_found"]:
+            previous_comparison["volume_delta"] = float(g["total_volume"]) - float(prev["total_volume"])
+            previous_comparison["sets_delta"] = int(g["total_sets"]) - int(prev["total_sets"])
+            previous_comparison["score_delta"] = float(g["score"]) - float(prev["score"])
+            previous_comparison["grade_delta"] = f"{prev['grade']} -> {g['grade']}"
+            prev_scores = {
+                "consistency": float(prev["consistency_score"]),
+                "strength": float(prev["strength_score"]),
+                "rep_range": float(prev["rep_adherence_score"]),
+                "volume": float(prev["volume_score"]),
+            }
+            previous_comparison["improved_categories"] = [
+                name for name, value in category_scores.items()
+                if value >= prev_scores[name] + 5
+            ]
+            previous_comparison["declined_categories"] = [
+                name for name, value in category_scores.items()
+                if value <= prev_scores[name] - 5
+            ]
+
+    return {
+        "session_found": True,
+        "overall_grade": g["grade"],
+        "numeric_score": g["score"],
+        "category_scores": category_scores,
+        "what_went_well": what_went_well,
+        "what_needs_improvement": what_needs_improvement,
+        "recommended_adjustment": recommended,
+        "best_lift": _format_lift(g["best_lift"], "No best lift available"),
+        "weakest_lift": _format_lift(g["worst_lift"], "No regression detected"),
+        "muscle_groups_trained": g["muscle_groups"],
+        "total_volume": g["total_volume"],
+        "total_sets": g["total_sets"],
+        "previous_comparison": previous_comparison,
+    }
+
+
+def session_exercise_drilldown(df: pd.DataFrame, selected_date) -> pd.DataFrame:
+    columns = [
+        "Exercise", "MuscleGroup", "Category", "Set", "Weight", "Reps",
+        "Volume", "Estimated1RM", "Status vs Previous",
+    ]
+    if df.empty or "Date" not in df.columns or "Exercise" not in df.columns:
+        return pd.DataFrame(columns=columns)
+    target = pd.to_datetime(selected_date, errors="coerce")
+    if pd.isna(target):
+        return pd.DataFrame(columns=columns)
+
+    work = df.copy()
+    work["Date"] = pd.to_datetime(work["Date"], errors="coerce")
+    work = work.dropna(subset=["Date", "Exercise"])
+    if work.empty:
+        return pd.DataFrame(columns=columns)
+    for col in ("Weight", "Reps", "Volume", "Set"):
+        if col not in work.columns:
+            work[col] = pd.NA
+        work[col] = pd.to_numeric(work[col], errors="coerce")
+    work["Estimated1RM"] = work["Weight"] * (1 + work["Reps"] / 30)
+
+    session = work[work["Date"].dt.date == target.date()].copy()
+    if session.empty:
+        return pd.DataFrame(columns=columns)
+
+    status_by_exercise: dict[str, str] = {}
+    for exercise, rows in session.groupby("Exercise", sort=False):
+        current_best = rows["Estimated1RM"].dropna().max()
+        previous = work[
+            (work["Exercise"] == exercise)
+            & (work["Date"].dt.date < target.date())
+        ]
+        if previous.empty or pd.isna(current_best):
+            status_by_exercise[str(exercise)] = "No Previous"
+            continue
+        previous_best = previous["Estimated1RM"].dropna().max()
+        if pd.isna(previous_best) or previous_best <= 0:
+            status_by_exercise[str(exercise)] = "No Previous"
+        elif float(current_best) >= float(previous_best) * 1.005:
+            status_by_exercise[str(exercise)] = "Improved"
+        elif float(current_best) >= float(previous_best) * 0.98:
+            status_by_exercise[str(exercise)] = "Same"
+        else:
+            status_by_exercise[str(exercise)] = "Regressed"
+
+    for col in ("MuscleGroup", "Category"):
+        if col not in session.columns:
+            session[col] = pd.NA
+    session["Status vs Previous"] = session["Exercise"].astype(str).map(status_by_exercise).fillna("No Previous")
+    session["Estimated1RM"] = session["Estimated1RM"].round(1)
+
+    sort_cols = [c for c in ("ExerciseOrder", "Set", "Exercise") if c in session.columns]
+    if sort_cols:
+        session = session.sort_values(sort_cols, na_position="last")
+    return session[columns].reset_index(drop=True)
 
 
 def grade_sessions_history(df: pd.DataFrame, limit: int = 30) -> pd.DataFrame:

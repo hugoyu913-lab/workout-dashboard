@@ -6,6 +6,8 @@ The optional `Checkins` Google Sheet tab adds bodyweight trend (7-day rolling av
 
 The first page is **Coach**, a daily cutting-phase action plan. It combines Apple Health HRV/resting HR, optional Checkins recovery data, steps, nutrition, weekly muscle frequency, anchor-lift strength retention, and cut pace into a deterministic readiness score, daily target checklist, workout focus, exercise targets, weekly progress tracker, and warning/action cards.
 
+The **Grades** page explains individual session grades. Select any logged workout date to see the grade, category score breakdown, what went well, what needs work, a cut-phase adjustment for next time, previous-session comparisons, and a per-exercise drilldown with status vs. the exercise's previous occurrence.
+
 ---
 
 ## Run Locally

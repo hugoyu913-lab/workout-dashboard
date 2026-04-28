@@ -158,6 +158,7 @@ Date, Workout, Exercise, MuscleGroup, Category, Set, Weight, Reps, Volume, Sourc
 - Muscle group frequency section that counts unique workout dates per muscle group in the active sidebar-filtered date range and displays both a table and bar chart.
 - Daily workout detail section with a workout date selector, daily summary metrics, and an exact per-set table for `Exercise`, `Set`, `Weight`, `Reps`, `Volume`, `MuscleGroup`, `Category`, and `SourceSheet`.
 - Workout comparison section that compares each selected-day exercise against its most recent previous occurrence and flags `Improved`, `Same`, or `Regressed`.
+- Grades page has a selectable session feedback system: grade/score breakdown, what went well, what needs improvement, next-session adjustment, best/weakest lift, previous-session comparison, and per-exercise drilldown with status vs previous occurrence.
 - Data tables for volume by exercise, PR tracker, and filtered raw rows.
 - Apple Health XML parsing into daily CSVs for steps, body weight, resting heart rate, HRV, active calories, sleep, nutrition, and VO2 max.
 - Health/workout correlation chart code for body composition, activity, nutrition, sleep, and full correlation matrix.
