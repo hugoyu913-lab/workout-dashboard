@@ -87,9 +87,34 @@ def _prep_checkins(checkins: pd.DataFrame | None) -> pd.DataFrame:
     data = checkins.copy()
     if "Date" not in data.columns:
         return pd.DataFrame()
-    data["Date"] = pd.to_datetime(data["Date"], errors="coerce")
+    raw_dates = data["Date"].astype(str).str.strip()
+    current_year = pd.Timestamp.now().year
+    bare_month_day = raw_dates.str.match(r"^\d{1,2}/\d{1,2}$", na=False)
+    normalized_dates = raw_dates.mask(bare_month_day, raw_dates + f"/{current_year}")
+    data["Date"] = pd.to_datetime(normalized_dates, format="mixed", errors="coerce")
+    missing = data["Date"].isna()
+    if missing.any():
+        data.loc[missing, "Date"] = pd.to_datetime(
+            raw_dates[missing] + f"/{current_year}",
+            format="mixed",
+            errors="coerce",
+        )
+    data["Date"] = data["Date"].dt.normalize()
     data = data.dropna(subset=["Date"]).sort_values("Date")
     return data
+
+
+def _checkins_status(checkins: pd.DataFrame | None) -> dict[str, object]:
+    raw_rows = 0 if checkins is None else len(checkins)
+    columns = [] if checkins is None else [str(col) for col in checkins.columns]
+    parsed = _prep_checkins(checkins)
+    latest = None if parsed.empty else parsed["Date"].max().date()
+    return {
+        "rows": raw_rows,
+        "parsed_rows": len(parsed),
+        "latest_date": latest,
+        "columns": columns,
+    }
 
 
 def _latest_checkin(checkins: pd.DataFrame | None) -> pd.Series | None:
@@ -550,6 +575,7 @@ def weekly_progress_tracker(df: pd.DataFrame | None, checkins: pd.DataFrame | No
         "avg_calories": avg_calories,
         "all_targets_days": all_targets_days,
         "perfect_streak": perfect_streak,
+        "checkins_rows": len(c),
     }
 
 
@@ -714,19 +740,27 @@ def _render_today_targets(checkins: pd.DataFrame | None, spreadsheet_id: str | N
     st.markdown("### TODAY'S TARGETS")
     row = _today_checkin(checkins)
     if row is None:
+        latest = _latest_checkin(checkins)
         sheet_link = ""
         if spreadsheet_id:
             url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit"
             sheet_link = f"<div style='margin-top:0.5rem;'><a href='{url}' target='_blank' style='color:#e8890c;'>Open Checkins sheet</a></div>"
-        st.markdown(
-            _card(
-                "Daily Lifestyle Targets",
-                "<div style='font-size:0.75rem;color:#c8c8cc;'>Log today's checkins to see targets.</div>" + sheet_link,
-                "#555560",
-            ),
-            unsafe_allow_html=True,
-        )
-        return
+        if latest is not None:
+            latest_date = pd.Timestamp(latest["Date"]).strftime("%Y-%m-%d")
+            message = f"Latest checkin found: {latest_date}. Add today's row for full daily targets."
+            row = latest
+        else:
+            message = "Log today's checkins to see targets."
+            st.markdown(
+                _card(
+                    "Daily Lifestyle Targets",
+                    f"<div style='font-size:0.75rem;color:#c8c8cc;'>{escape(message)}</div>" + sheet_link,
+                    "#555560",
+                ),
+                unsafe_allow_html=True,
+            )
+            return
+        st.caption(message)
 
     targets = [
         ("STEPS", "Steps", DAILY_STEPS_GOAL, ""),
@@ -736,6 +770,21 @@ def _render_today_targets(checkins: pd.DataFrame | None, spreadsheet_id: str | N
         ("FAT", "Fat", DAILY_FAT_TARGET, "g"),
         ("SLEEP", "SleepHours", DAILY_SLEEP_TARGET, "h"),
     ]
+
+    available = [
+        column for _, column, _, _ in targets
+        if pd.notna(pd.to_numeric(row.get(column), errors="coerce"))
+    ]
+    if not available:
+        st.markdown(
+            _card(
+                "Daily Lifestyle Targets",
+                "<div style='font-size:0.75rem;color:#c8c8cc;'>Checkin row found, but no lifestyle targets are filled yet.</div>" + sheet_link,
+                "#555560",
+            ),
+            unsafe_allow_html=True,
+        )
+        return
     for label, column, target, unit in targets:
         current_raw = pd.to_numeric(row.get(column), errors="coerce")
         current = None if pd.isna(current_raw) else float(current_raw)
@@ -792,6 +841,19 @@ def _render_readiness(readiness: dict[str, object]) -> None:
             delta = int(item["delta"])
             delta_label = f"{delta:+d}"
             col.metric(str(item["label"]), delta_label, str(item["note"]))
+
+
+def _render_checkins_status(checkins: pd.DataFrame | None) -> None:
+    status = _checkins_status(checkins)
+    latest = status["latest_date"]
+    latest_label = latest.strftime("%Y-%m-%d") if latest is not None else "None"
+    columns = ", ".join(status["columns"]) if status["columns"] else "None"
+    st.caption(
+        f"Checkins rows loaded: {status['rows']} | "
+        f"Parsed rows: {status['parsed_rows']} | "
+        f"Latest checkin date: {latest_label} | "
+        f"Columns detected: {columns}"
+    )
 
 
 def _render_checklist(checklist: list[dict[str, object]]) -> None:
@@ -874,11 +936,12 @@ def _render_progress(progress: dict[str, object]) -> None:
         col.progress(fill)
 
     st.markdown("#### Lifestyle")
+    empty_label = "No checkin rows" if progress.get("checkins_rows", 0) == 0 else "Not filled"
     lifestyle_rows = [
-        ("Avg daily steps", "No checkin data" if progress["avg_steps"] is None else f"{progress['avg_steps']:,.0f} / {DAILY_STEPS_GOAL:,}", None if progress["avg_steps"] is None else float(progress["avg_steps"]), DAILY_STEPS_GOAL * 0.9, DAILY_STEPS_GOAL * 0.7),
-        ("Avg protein", "No checkin data" if progress["avg_protein"] is None else f"{progress['avg_protein']:.0f}g / {DAILY_PROTEIN_TARGET}g", None if progress["avg_protein"] is None else float(progress["avg_protein"]), DAILY_PROTEIN_TARGET * 0.9, DAILY_PROTEIN_TARGET * 0.7),
-        ("Avg sleep", "No checkin data" if progress["avg_sleep"] is None else f"{progress['avg_sleep']:.1f}h / {DAILY_SLEEP_TARGET:g}h", None if progress["avg_sleep"] is None else float(progress["avg_sleep"]), DAILY_SLEEP_TARGET * 0.9, DAILY_SLEEP_MINIMUM),
-        ("Avg calories", "No checkin data" if progress["avg_calories"] is None else f"{progress['avg_calories']:,.0f} / {DAILY_CALORIES_TARGET:,}", None if progress["avg_calories"] is None else 100 - abs(float(progress["avg_calories"]) - DAILY_CALORIES_TARGET) / DAILY_CALORIES_TARGET * 100, 90, 70),
+        ("Avg daily steps", empty_label if progress["avg_steps"] is None else f"{progress['avg_steps']:,.0f} / {DAILY_STEPS_GOAL:,}", None if progress["avg_steps"] is None else float(progress["avg_steps"]), DAILY_STEPS_GOAL * 0.9, DAILY_STEPS_GOAL * 0.7),
+        ("Avg protein", empty_label if progress["avg_protein"] is None else f"{progress['avg_protein']:.0f}g / {DAILY_PROTEIN_TARGET}g", None if progress["avg_protein"] is None else float(progress["avg_protein"]), DAILY_PROTEIN_TARGET * 0.9, DAILY_PROTEIN_TARGET * 0.7),
+        ("Avg sleep", empty_label if progress["avg_sleep"] is None else f"{progress['avg_sleep']:.1f}h / {DAILY_SLEEP_TARGET:g}h", None if progress["avg_sleep"] is None else float(progress["avg_sleep"]), DAILY_SLEEP_TARGET * 0.9, DAILY_SLEEP_MINIMUM),
+        ("Avg calories", empty_label if progress["avg_calories"] is None else f"{progress['avg_calories']:,.0f} / {DAILY_CALORIES_TARGET:,}", None if progress["avg_calories"] is None else 100 - abs(float(progress["avg_calories"]) - DAILY_CALORIES_TARGET) / DAILY_CALORIES_TARGET * 100, 90, 70),
         ("All-target days", f"{progress['all_targets_days']} this week", float(progress["all_targets_days"]), 4, 2),
         ("Perfect streak", f"{progress['perfect_streak']} days", float(progress["perfect_streak"]), 3, 1),
     ]
@@ -917,6 +980,7 @@ def render_coach_page(
     warnings = weekly_warnings(df, checkins)
 
     _render_readiness(readiness)
+    _render_checkins_status(checkins)
     st.divider()
     _render_today_targets(checkins, spreadsheet_id)
     st.divider()

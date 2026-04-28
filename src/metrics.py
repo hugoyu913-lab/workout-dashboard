@@ -35,6 +35,20 @@ CHECKIN_COLUMNS = [
 ]
 
 
+def _parse_checkin_dates(values: pd.Series) -> pd.Series:
+    """Parse Checkins dates, including bare m/d values, with current-year fallback."""
+    raw = values.astype(str).str.strip()
+    current_year = pd.Timestamp.now().year
+    bare_month_day = raw.str.match(r"^\d{1,2}/\d{1,2}$", na=False)
+    normalized = raw.mask(bare_month_day, raw + f"/{current_year}")
+    parsed = pd.to_datetime(normalized, format="mixed", errors="coerce")
+    missing = parsed.isna()
+    if missing.any():
+        parsed_with_year = pd.to_datetime(raw[missing] + f"/{current_year}", format="mixed", errors="coerce")
+        parsed.loc[missing] = parsed_with_year
+    return parsed.dt.normalize()
+
+
 def weekly_total_volume(df: pd.DataFrame) -> pd.DataFrame:
     dated = df.dropna(subset=["Date"]).copy()
     dated["Week"] = dated["Date"].dt.to_period("W").dt.start_time
@@ -52,7 +66,7 @@ def clean_checkins(raw: pd.DataFrame) -> pd.DataFrame:
             df[col] = pd.NA
 
     df = df[CHECKIN_COLUMNS].copy()
-    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    df["Date"] = _parse_checkin_dates(df["Date"])
 
     numeric_cols = [
         "Bodyweight",
