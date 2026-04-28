@@ -182,7 +182,7 @@ def compute_readiness(checkins: pd.DataFrame | None) -> dict[str, object]:
         steps = pd.to_numeric(last.get("Steps"), errors="coerce")
         if pd.notna(steps):
             steps = float(steps)
-            if steps > 10000:
+            if steps > DAILY_STEPS_GOAL:
                 delta = 10
             elif steps >= 7500:
                 delta = 5

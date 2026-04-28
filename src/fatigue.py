@@ -4,7 +4,7 @@ from typing import Collection
 
 import pandas as pd
 
-from config.profile import ANCHOR_LIFTS, MAX_MUSCLE_FREQ_PER_WEEK
+from config.profile import ANCHOR_LIFTS
 
 
 def _normalise_exercise(name: str) -> str:
@@ -23,6 +23,7 @@ def fatigue_risk_detector(
     df: pd.DataFrame,
     weeks: int = 3,
     deload_dates: Collection[pd.Timestamp] | None = None,
+    checkins: pd.DataFrame | None = None,
 ) -> dict[str, object]:
     empty: dict[str, object] = {
         "risk": "Low",
@@ -41,9 +42,11 @@ def fatigue_risk_detector(
     if work.empty:
         return empty
 
+    # Deload suppression — filter deload weeks from ALL workout-based signals
+    deload_periods: set = set()
     if deload_dates:
-        deload_weeks = {pd.Timestamp(d).to_period("W") for d in deload_dates}
-        work = work[~work["Date"].dt.to_period("W").isin(deload_weeks)].copy()
+        deload_periods = {pd.Timestamp(d).to_period("W") for d in deload_dates}
+        work = work[~work["Date"].dt.to_period("W").isin(deload_periods)].copy()
 
     latest_date = work["Date"].max()
     cutoff = latest_date - pd.Timedelta(weeks=weeks)
@@ -66,8 +69,9 @@ def fatigue_risk_detector(
 
     same_weight_rep_drops: list[str] = []
     anchor_rep_drops: list[str] = []
-    regression_groups: dict[str, int] = {}
+    regression_dates_by_group: dict[str, list] = {}
     anchor_names = _anchor_lift_names()
+
     for exercise, group in session_best.groupby("Exercise"):
         ordered = group.sort_values("Date").reset_index(drop=True)
         if len(ordered) < 2:
@@ -92,7 +96,19 @@ def fatigue_risk_detector(
                 else:
                     same_weight_rep_drops.append(message)
                 mg = str(curr_row.get("MuscleGroup", "unknown")).strip().lower() or "unknown"
-                regression_groups[mg] = regression_groups.get(mg, 0) + 1
+                if mg not in {"unknown", "other"}:
+                    regression_dates_by_group.setdefault(mg, []).append(curr_row["Date"])
+
+    # Muscle groups with 2+ regressions within any 14-day window
+    clustered_groups: list[str] = []
+    for mg, dates in sorted(regression_dates_by_group.items()):
+        if len(dates) < 2:
+            continue
+        dates_sorted = sorted(set(pd.Timestamp(d) for d in dates))
+        for i in range(len(dates_sorted) - 1):
+            if (dates_sorted[i + 1] - dates_sorted[i]).days <= 14:
+                clustered_groups.append(mg)
+                break
 
     reasons: list[str] = []
     if anchor_rep_drops:
@@ -100,58 +116,68 @@ def fatigue_risk_detector(
     if same_weight_rep_drops:
         remaining = max(0, 3 - len(reasons))
         reasons.extend(same_weight_rep_drops[:remaining])
-
-    clustered_groups = [
-        g for g, count in sorted(regression_groups.items())
-        if count >= 2 and g not in {"unknown", "other"}
-    ]
     for g in clustered_groups:
+        count = len(regression_dates_by_group[g])
         reasons.append(
-            f"{g.title()} has {regression_groups[g]} same-load rep regressions in the recent window."
+            f"{g.title()} has {count} same-load rep regressions within 14 days."
         )
 
-    # Per-muscle-group weekly frequency check (replaces total-session count heuristic)
-    freq_penalty = 0
-    if "MuscleGroup" in recent.columns:
-        freq_work = recent.copy()
-        freq_work["Week"] = freq_work["Date"].dt.to_period("W").dt.start_time
-        mg_weekly = (
-            freq_work.dropna(subset=["MuscleGroup"])
-            .groupby(["Week", "MuscleGroup"], as_index=False)["Date"]
-            .nunique()
-            .rename(columns={"Date": "Days"})
-        )
-        overfrequent = mg_weekly[
-            (mg_weekly["Days"] > MAX_MUSCLE_FREQ_PER_WEEK)
-            & (~mg_weekly["MuscleGroup"].str.lower().isin({"unknown", "other"}))
-        ]
-        for _, row in overfrequent.iterrows():
-            week_str = (
-                row["Week"].strftime("%b %d")
-                if hasattr(row["Week"], "strftime")
-                else str(row["Week"])
+    # Checkin-based signals (suppressed during deload weeks)
+    checkin_reasons: list[str] = []
+    if checkins is not None and not checkins.empty and "Date" in checkins.columns:
+        c = checkins.copy()
+        c["Date"] = pd.to_datetime(c["Date"], errors="coerce")
+        c = c.dropna(subset=["Date"]).sort_values("Date")
+        if not c.empty:
+            latest_row = c.iloc[-1]
+            in_deload = bool(
+                deload_periods
+                and latest_row["Date"].to_period("W") in deload_periods
             )
-            reasons.append(
-                f"{str(row['MuscleGroup']).title()} trained {row['Days']}x in week of "
-                f"{week_str} (>{MAX_MUSCLE_FREQ_PER_WEEK}x/week)."
-            )
-            freq_penalty += 1
+            if not in_deload:
+                sleep = pd.to_numeric(latest_row.get("SleepHours"), errors="coerce")
+                energy = pd.to_numeric(latest_row.get("Energy"), errors="coerce")
+                soreness = pd.to_numeric(latest_row.get("Soreness"), errors="coerce")
+                if pd.notna(sleep) and float(sleep) < 6:
+                    checkin_reasons.append(
+                        f"Sleep was {float(sleep):.1f}h (below 6h threshold)."
+                    )
+                if pd.notna(energy) and float(energy) <= 2:
+                    checkin_reasons.append(
+                        f"Energy level is {float(energy):.0f}/10 (critically low)."
+                    )
+                if pd.notna(soreness) and float(soreness) >= 4:
+                    checkin_reasons.append(
+                        f"Soreness is {float(soreness):.0f}/10 (elevated)."
+                    )
+    reasons.extend(checkin_reasons)
 
-    risk_points = len(anchor_rep_drops) * 2 + len(same_weight_rep_drops) + len(clustered_groups) * 2 + freq_penalty
-    if risk_points >= 4:
+    # Risk scoring: any anchor regression triggers High immediately
+    if anchor_rep_drops:
         risk = "High"
         suggested_action = (
-            "Reduce fatigue: add recovery, increase RIR by 1-2, or trim intensity "
-            "for regressing muscle groups."
-        )
-    elif risk_points >= 2:
-        risk = "Moderate"
-        suggested_action = (
-            "Monitor recovery and avoid pushing load on exercises with same-weight rep drops."
+            "Anchor lift regression detected — deload or form check recommended immediately."
         )
     else:
-        risk = "Low"
-        suggested_action = "Maintain current recovery habits and keep loads stable."
+        risk_points = (
+            len(same_weight_rep_drops)
+            + len(clustered_groups) * 2
+            + len(checkin_reasons)
+        )
+        if risk_points >= 4:
+            risk = "High"
+            suggested_action = (
+                "Reduce fatigue: add recovery, increase RIR by 1-2, or trim intensity "
+                "for regressing muscle groups."
+            )
+        elif risk_points >= 2:
+            risk = "Moderate"
+            suggested_action = (
+                "Monitor recovery and avoid pushing load on exercises with same-weight rep drops."
+            )
+        else:
+            risk = "Low"
+            suggested_action = "Maintain current recovery habits and keep loads stable."
 
     return {
         "risk": risk,

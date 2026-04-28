@@ -727,14 +727,18 @@ def grade_session(df: pd.DataFrame, session_date=None) -> dict[str, object]:
     consistency_score = min(today_sets / avg_sets * 100, 100.0) if avg_sets > 0 else 50.0
 
     # ── Composite ────────────────────────────────────────────────────────
-    # Cut-phase weights: completing sets (consistency) is #1 priority
+    # Cut-phase weights: strength retention is #1, consistency #2; 2 working sets is intentional
     composite = (
-        strength_score * 0.30
+        strength_score * 0.40
         + rep_score * 0.20
-        + volume_score * 0.15
+        + volume_score * 0.05
         + consistency_score * 0.35
     )
     grade = _score_to_grade(composite)
+
+    coaching_comment = _grade_coaching_comment(grade)
+    if volume_score < 70:
+        coaching_comment += " Low volume is intentional for this cut phase."
 
     # ── Best / worst lift ────────────────────────────────────────────────
     valid_e1rms = {
@@ -770,7 +774,7 @@ def grade_session(df: pd.DataFrame, session_date=None) -> dict[str, object]:
         "rep_adherence_score": round(rep_score, 1),
         "volume_score": round(volume_score, 1),
         "consistency_score": round(consistency_score, 1),
-        "coaching_comment": _grade_coaching_comment(grade),
+        "coaching_comment": coaching_comment,
         "best_lift": best_lift,
         "worst_lift": worst_lift,
         "muscle_groups": muscle_groups,

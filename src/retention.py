@@ -93,10 +93,10 @@ def strength_retention_score(
     improved_pct = improved / exercises_with_history * 100
     maintained_pct = maintained / exercises_with_history * 100
     regressed_pct = regressed / exercises_with_history * 100
-    weighted_total = sum(2.0 if is_anchor else 1.0 for _, is_anchor in statuses)
+    weighted_total = sum(1.5 if is_anchor else 1.0 for _, is_anchor in statuses)
     weighted_score = 0.0
     for status, is_anchor in statuses:
-        weight = 2.0 if is_anchor else 1.0
+        weight = 1.5 if is_anchor else 1.0
         if status == "Improved":
             weighted_score += weight
         elif status == "Maintained":
