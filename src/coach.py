@@ -1045,20 +1045,19 @@ def _render_split_rotation(rotation: dict[str, object]) -> None:
             bg = "#0d0d0f"
             text = "#777782"
         chips.append(
-            f"""
-            <div style="border:1px solid {border};background:{bg};border-radius:3px;
-                        padding:0.45rem 0.65rem;min-width:145px;">
-              <div style="font-size:0.58rem;letter-spacing:0.16em;color:#555560;">{label}</div>
-              <div style="font-size:0.66rem;color:{text};margin-top:0.2rem;">{escape(split_label)}</div>
-            </div>
-            """
+            f"<div style='border:1px solid {border};background:{bg};border-radius:3px;"
+            "padding:0.45rem 0.65rem;min-width:145px;'>"
+            f"<div style='font-size:0.58rem;letter-spacing:0.16em;color:#555560;'>{label}</div>"
+            f"<div style='font-size:0.66rem;color:{text};margin-top:0.2rem;'>{escape(split_label)}</div>"
+            "</div>"
         )
-    st.markdown(
+    chips_html = (
         "<div style='display:flex;gap:0.45rem;flex-wrap:wrap;margin-top:0.75rem;'>"
         + "".join(chips)
-        + "</div>",
-        unsafe_allow_html=True,
+        + "</div>"
     )
+    with st.container():
+        st.markdown(chips_html, unsafe_allow_html=True)
 
 
 def _render_checklist(checklist: list[dict[str, object]]) -> None:
