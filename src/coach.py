@@ -9,6 +9,8 @@ import streamlit as st
 
 from config.profile import (
     ANCHOR_LIFTS,
+    CUT_RATE_MAX,
+    CUT_RATE_MIN,
     DAILY_CALORIES_TARGET,
     DAILY_CARBS_TARGET,
     DAILY_FAT_TARGET,
@@ -786,6 +788,7 @@ def _exercise_targets(
                 overload = overload_by_exercise.get(key, {})
                 target_w = overload.get("recommended_weight", last_w)
                 target_reps = overload.get("recommended_reps", f"{TARGET_REPS_MIN}-{TARGET_REPS_MAX}" if target_w is not None else None)
+                ex_streak = _progression_streak(df, exercise)
                 selected.append({
                     "exercise": exercise,
                     "muscle_group": muscle,
@@ -798,6 +801,8 @@ def _exercise_targets(
                     "target_reps": target_reps,
                     "overload_note": str(overload.get("instruction", "No history found")),
                     "is_anchor": _is_anchor(exercise),
+                    "streak": ex_streak,
+                    "streak_broken": last_r is not None and ex_streak == 0,
                 })
                 used.add(key)
                 if len(selected) >= 3:
@@ -811,6 +816,7 @@ def _exercise_targets(
                 continue
             last_w, last_r = _last_performance(work, exercise)
             overload = overload_by_exercise.get(key, {})
+            ex_streak = _progression_streak(df, exercise)
             selected.append({
                 "exercise": exercise,
                 "muscle_group": "",
@@ -823,6 +829,8 @@ def _exercise_targets(
                 "target_reps": overload.get("recommended_reps", f"{TARGET_REPS_MIN}-{TARGET_REPS_MAX}" if last_w is not None else None),
                 "overload_note": str(overload.get("instruction", "No history found")),
                 "is_anchor": _is_anchor(exercise),
+                "streak": ex_streak,
+                "streak_broken": last_r is not None and ex_streak == 0,
             })
             used.add(key)
             if len(selected) >= 3:
@@ -1463,11 +1471,45 @@ def _weight_regressed_twice(weights: list[float]) -> bool:
     return False
 
 
+def _progression_streak(df: pd.DataFrame | None, exercise: str) -> int:
+    work = _prep_workouts(df)
+    if work.empty:
+        return 0
+    rows = work[work["Exercise"].astype(str).str.lower().str.strip() == _normalise_exercise(exercise)]
+    rows = rows.dropna(subset=["Date", "Weight", "Reps"]).copy()
+    if rows.empty:
+        return 0
+    rows["_w"] = pd.to_numeric(rows["Weight"], errors="coerce")
+    rows["_r"] = pd.to_numeric(rows["Reps"], errors="coerce")
+    rows = rows.dropna(subset=["_w", "_r"])
+    rows["_date"] = rows["Date"].dt.date
+    bests = (
+        rows.sort_values(["_date", "_r", "_w"], ascending=[True, False, False])
+        .groupby("_date", as_index=False)
+        .first()
+        .sort_values("_date")
+    )
+    if len(bests) < 2:
+        return 0
+    sessions = list(zip(bests["_w"].tolist(), bests["_r"].tolist()))
+    streak = 0
+    for i in range(len(sessions) - 1, 0, -1):
+        curr_w, curr_r = sessions[i]
+        prev_w, prev_r = sessions[i - 1]
+        if curr_r >= prev_r and curr_w >= prev_w - 0.01:
+            streak += 1
+        else:
+            break
+    return streak
+
+
 def _anchor_lift_trends(df: pd.DataFrame | None) -> list[dict[str, object]]:
     work = _prep_workouts(df)
     trends: list[dict[str, object]] = []
     for exercise in _anchor_lift_names():
         sessions = _anchor_session_bests(work, exercise).tail(4)
+        streak = _progression_streak(df, exercise)
+        streak_broken = not sessions.empty and len(sessions) >= 2 and streak == 0
         if sessions.empty:
             trends.append({
                 "exercise": exercise,
@@ -1475,6 +1517,8 @@ def _anchor_lift_trends(df: pd.DataFrame | None) -> list[dict[str, object]]:
                 "trend": "→",
                 "flag": "",
                 "color": "#555560",
+                "streak": 0,
+                "streak_broken": False,
             })
             continue
 
@@ -1513,6 +1557,8 @@ def _anchor_lift_trends(df: pd.DataFrame | None) -> list[dict[str, object]]:
             "trend": trend,
             "flag": flag,
             "color": color,
+            "streak": streak,
+            "streak_broken": streak_broken,
         })
     return trends
 
@@ -1524,11 +1570,17 @@ def render_anchor_lift_trends(df: pd.DataFrame | None) -> None:
         cols = st.columns(3)
         for col, row in zip(cols, trends[start:start + 3]):
             flag = str(row["flag"])
+            streak = int(row.get("streak", 0))
+            streak_broken = bool(row.get("streak_broken", False))
             body = (
                 _small_line("Last", row["last"])
                 + _small_line("Trend", row["trend"], str(row["color"]))
                 + (_small_line("Flag", flag, str(row["color"])) if flag else _small_line("Flag", "No logged sessions", "#555560"))
             )
+            if streak >= 2:
+                body += _small_line("Streak", f"↑ {streak}-session streak", "#22c55e")
+            elif streak_broken:
+                body += _small_line("Streak", "⚠ streak broken", "#ef4444")
             col.markdown(_card(str(row["exercise"]), body, str(row["color"])), unsafe_allow_html=True)
 
 
@@ -1598,11 +1650,17 @@ def _render_game_plan(plan: dict[str, object]) -> None:
     for col, ex in zip(cols, exercises):
         name = str(ex["exercise"])
         title = f"{'⚓ ' if ex['is_anchor'] else ''}{name}"
+        streak = int(ex.get("streak", 0))
+        streak_broken = bool(ex.get("streak_broken", False))
         body = (
             _small_line("Last", _format_last(ex["last_weight"], ex["last_reps"]))
             + _small_line("Target", _format_target(ex["target_weight"], ex["target_reps"]), "#e8890c")
             + _small_line("Reason", ex.get("overload_note", "No history found"))
         )
+        if streak >= 2:
+            body += _small_line("Streak", f"↑ {streak}-session streak", "#22c55e")
+        elif streak_broken:
+            body += _small_line("Streak", "⚠ streak broken", "#ef4444")
         col.markdown(_card(title, body, "#e8890c" if ex["is_anchor"] else "#1e1e22"), unsafe_allow_html=True)
 
 
@@ -1673,6 +1731,310 @@ def _has_severe_recovery_warning(warnings: list[dict[str, str]]) -> bool:
     return False
 
 
+def build_weekly_review(
+    df: pd.DataFrame | None,
+    checkins: pd.DataFrame | None,
+) -> dict[str, object]:
+    today = _today()
+    week_ago = today - timedelta(days=7)
+    two_weeks_ago = today - timedelta(days=14)
+    c = _prep_checkins(checkins)
+    work = _prep_workouts(df)
+
+    # ── weight_trend ───────────────────────────────────────────────────────
+    this_bw: list[float] = []
+    last_bw: list[float] = []
+    if not c.empty and "Bodyweight" in c.columns:
+        c_bw = c.dropna(subset=["Bodyweight"]).copy()
+        c_bw["_bw"] = pd.to_numeric(c_bw["Bodyweight"], errors="coerce")
+        c_bw = c_bw.dropna(subset=["_bw"])
+        this_bw = c_bw[c_bw["Date"].dt.date > week_ago]["_bw"].tolist()
+        last_bw = c_bw[
+            (c_bw["Date"].dt.date > two_weeks_ago) & (c_bw["Date"].dt.date <= week_ago)
+        ]["_bw"].tolist()
+
+    this_week_avg = float(sum(this_bw) / len(this_bw)) if this_bw else None
+    last_week_avg = float(sum(last_bw) / len(last_bw)) if last_bw else None
+
+    if this_week_avg is not None and last_week_avg is not None and last_week_avg > 0:
+        weekly_change = this_week_avg - last_week_avg
+        rate_pct = (last_week_avg - this_week_avg) / last_week_avg
+        if rate_pct > CUT_RATE_MAX:
+            wt_status = "Too Fast"
+        elif rate_pct < CUT_RATE_MIN:
+            wt_status = "Too Slow"
+        else:
+            wt_status = "On Track"
+    else:
+        weekly_change = None
+        rate_pct = None
+        wt_status = "No Data"
+
+    weight_trend: dict[str, object] = {
+        "this_week_avg": this_week_avg,
+        "last_week_avg": last_week_avg,
+        "weekly_change": weekly_change,
+        "rate_pct": rate_pct,
+        "status": wt_status,
+    }
+
+    # ── strength_summary ───────────────────────────────────────────────────
+    anchors_maintained = 0
+    anchors_total = 0
+    regressions: list[str] = []
+    this_1rm_sum = 0.0
+    last_1rm_sum = 0.0
+    anchor_scored = 0
+
+    if not work.empty:
+        for exercise in _anchor_lift_names():
+            rows = work[
+                work["Exercise"].astype(str).str.lower().str.strip() == _normalise_exercise(exercise)
+            ].dropna(subset=["Date", "Estimated1RM"]).copy()
+            if rows.empty:
+                continue
+            daily = rows.groupby(rows["Date"].dt.date)["Estimated1RM"].max().sort_index()
+            this_slice = daily[daily.index > week_ago]
+            last_slice = daily[(daily.index > two_weeks_ago) & (daily.index <= week_ago)]
+            if this_slice.empty or last_slice.empty:
+                continue
+            this_1rm = float(this_slice.max())
+            last_1rm = float(last_slice.max())
+            anchors_total += 1
+            if this_1rm >= last_1rm * 0.98:
+                anchors_maintained += 1
+            else:
+                regressions.append(exercise)
+            this_1rm_sum += this_1rm
+            last_1rm_sum += last_1rm
+            anchor_scored += 1
+
+    if anchor_scored > 0 and last_1rm_sum > 0:
+        retention_delta = (this_1rm_sum - last_1rm_sum) / last_1rm_sum * 100
+    else:
+        retention_delta = 0.0
+
+    strength_summary: dict[str, object] = {
+        "anchors_maintained": anchors_maintained,
+        "anchors_total": anchors_total,
+        "regressions": regressions,
+        "retention_delta": retention_delta,
+    }
+
+    # ── recovery_summary ───────────────────────────────────────────────────
+    avg_sleep: float | None = None
+    avg_energy: float | None = None
+    avg_soreness: float | None = None
+    poor_sleep_days = 0
+    poor_energy_days = 0
+    high_soreness_days = 0
+
+    if not c.empty:
+        week_c = c[c["Date"].dt.date > week_ago]
+        if not week_c.empty:
+            if "SleepHours" in week_c.columns:
+                sv = pd.to_numeric(week_c["SleepHours"], errors="coerce").dropna()
+                if not sv.empty:
+                    avg_sleep = float(sv.mean())
+                    poor_sleep_days = int((sv < DAILY_SLEEP_TARGET).sum())
+            if "Energy" in week_c.columns:
+                ev = pd.to_numeric(week_c["Energy"], errors="coerce").dropna()
+                if not ev.empty:
+                    avg_energy = float(ev.mean())
+                    poor_energy_days = int((ev <= 3).sum())
+            if "Soreness" in week_c.columns:
+                sorv = pd.to_numeric(week_c["Soreness"], errors="coerce").dropna()
+                if not sorv.empty:
+                    avg_soreness = float(sorv.mean())
+                    high_soreness_days = int((sorv >= 4).sum())
+
+    recovery_summary: dict[str, object] = {
+        "avg_sleep": avg_sleep,
+        "avg_energy": avg_energy,
+        "avg_soreness": avg_soreness,
+        "poor_sleep_days": poor_sleep_days,
+        "poor_energy_days": poor_energy_days,
+        "high_soreness_days": high_soreness_days,
+    }
+
+    checkins_this_week = 0
+    if not c.empty:
+        checkins_this_week = int((c["Date"].dt.date > week_ago).sum())
+
+    # ── decisions ──────────────────────────────────────────────────────────
+    decisions: list[str] = []
+    rp = rate_pct if rate_pct is not None else 0.0
+    rd = retention_delta
+    recovery_good = (avg_sleep is not None and avg_sleep >= 6.5) and (
+        avg_energy is not None and avg_energy >= 5
+    )
+
+    if rate_pct is not None and rp > CUT_RATE_MAX and rd < -5:
+        decisions.append(
+            "Weight dropping too fast and strength declining — add 150 calories"
+        )
+    elif rate_pct is not None and rp > CUT_RATE_MAX:
+        decisions.append(
+            "Cut pace aggressive — consider adding 100 calories or one higher-carb day"
+        )
+    if len(decisions) < 3 and rate_pct is not None and rp < CUT_RATE_MIN and recovery_good:
+        decisions.append("Cut pace slow and recovery strong — reduce calories by 100")
+    if len(decisions) < 3 and avg_sleep is not None and avg_sleep < 6.5 and poor_sleep_days >= 4:
+        decisions.append(
+            "Sleep is consistently low — address before any training or diet changes"
+        )
+    if len(decisions) < 3 and poor_energy_days >= 4:
+        decisions.append(
+            "Energy low most of the week — check calories and sleep before increasing intensity"
+        )
+    if (
+        len(decisions) < 3
+        and anchors_maintained == anchors_total
+        and anchors_total > 0
+        and wt_status == "On Track"
+    ):
+        decisions.append("All anchors maintained and cut on track — no changes needed")
+    if not decisions:
+        decisions.append("Insufficient data for weekly decision")
+
+    return {
+        "weight_trend": weight_trend,
+        "strength_summary": strength_summary,
+        "recovery_summary": recovery_summary,
+        "decisions": decisions,
+        "checkins_this_week": checkins_this_week,
+    }
+
+
+def render_weekly_review(
+    df: pd.DataFrame | None,
+    checkins: pd.DataFrame | None,
+) -> None:
+    today = _today()
+    is_monday = today.weekday() == 0
+    review = build_weekly_review(df, checkins)
+    wt = review["weight_trend"]
+    ss = review["strength_summary"]
+    rs = review["recovery_summary"]
+    decisions = list(review["decisions"])
+
+    with st.expander("Weekly Review", expanded=is_monday):
+        if int(review["checkins_this_week"]) < 5:
+            st.caption("Log more checkins for weekly decisions (need 5+ days this week).")
+            return
+
+        st.markdown("#### Weight Trend")
+        wt_status = str(wt["status"])
+        wt_color = {
+            "On Track": "#22c55e",
+            "Too Fast": "#ef4444",
+            "Too Slow": "#f59e0b",
+        }.get(wt_status, "#555560")
+        this_avg_s = f"{wt['this_week_avg']:.1f} lbs" if wt["this_week_avg"] else "—"
+        last_avg_s = f"{wt['last_week_avg']:.1f} lbs" if wt["last_week_avg"] else "—"
+        change_s = f"{wt['weekly_change']:+.2f} lbs" if wt["weekly_change"] is not None else "—"
+        rate_s = f"{abs(float(wt['rate_pct'])) * 100:.2f}%" if wt["rate_pct"] is not None else "—"
+        cols = st.columns(3)
+        cols[0].markdown(
+            _card("This Week Avg", _small_line("Bodyweight", this_avg_s), "#1e1e22"),
+            unsafe_allow_html=True,
+        )
+        cols[1].markdown(
+            _card("Last Week Avg", _small_line("Bodyweight", last_avg_s), "#1e1e22"),
+            unsafe_allow_html=True,
+        )
+        cols[2].markdown(
+            _card(
+                "Cut Rate",
+                _small_line("Change", change_s)
+                + _small_line("Rate", rate_s, wt_color)
+                + _small_line("Status", wt_status, wt_color),
+                wt_color,
+            ),
+            unsafe_allow_html=True,
+        )
+
+        st.markdown("#### Strength")
+        maintained_s = (
+            f"{ss['anchors_maintained']}/{ss['anchors_total']}" if ss["anchors_total"] else "No data"
+        )
+        delta_s = f"{float(ss['retention_delta']):+.1f}%" if ss["anchors_total"] else "—"
+        reg_list = list(ss["regressions"])
+        reg_s = ", ".join(reg_list) if reg_list else "None"
+        reg_color = "#ef4444" if reg_list else "#22c55e"
+        cols = st.columns(3)
+        cols[0].markdown(
+            _card("Anchors Maintained", _small_line("This vs last week", maintained_s), "#1e1e22"),
+            unsafe_allow_html=True,
+        )
+        cols[1].markdown(
+            _card("1RM Delta", _small_line("vs last week", delta_s), "#1e1e22"),
+            unsafe_allow_html=True,
+        )
+        cols[2].markdown(
+            _card("Regressions", _small_line("Lifts", reg_s, reg_color), reg_color),
+            unsafe_allow_html=True,
+        )
+
+        st.markdown("#### Recovery (past 7 days)")
+        sleep_s = f"{float(rs['avg_sleep']):.1f}h" if rs["avg_sleep"] is not None else "—"
+        energy_s = f"{float(rs['avg_energy']):.1f}/10" if rs["avg_energy"] is not None else "—"
+        soreness_s = f"{float(rs['avg_soreness']):.1f}/10" if rs["avg_soreness"] is not None else "—"
+        poor_sleep = int(rs["poor_sleep_days"])
+        poor_energy = int(rs["poor_energy_days"])
+        high_soreness = int(rs["high_soreness_days"])
+        cols = st.columns(3)
+        cols[0].markdown(
+            _card(
+                "Sleep",
+                _small_line("Avg", sleep_s)
+                + _small_line(
+                    f"Nights < {DAILY_SLEEP_TARGET:g}h",
+                    str(poor_sleep),
+                    "#ef4444" if poor_sleep >= 4 else "#c8c8cc",
+                ),
+                "#ef4444" if poor_sleep >= 4 else "#1e1e22",
+            ),
+            unsafe_allow_html=True,
+        )
+        cols[1].markdown(
+            _card(
+                "Energy",
+                _small_line("Avg", energy_s)
+                + _small_line(
+                    "Days ≤ 3",
+                    str(poor_energy),
+                    "#ef4444" if poor_energy >= 4 else "#c8c8cc",
+                ),
+                "#ef4444" if poor_energy >= 4 else "#1e1e22",
+            ),
+            unsafe_allow_html=True,
+        )
+        cols[2].markdown(
+            _card(
+                "Soreness",
+                _small_line("Avg", soreness_s)
+                + _small_line(
+                    "Days ≥ 4",
+                    str(high_soreness),
+                    "#ef4444" if high_soreness >= 4 else "#c8c8cc",
+                ),
+                "#ef4444" if high_soreness >= 4 else "#1e1e22",
+            ),
+            unsafe_allow_html=True,
+        )
+
+        decisions_html = "".join(
+            f"<div style='font-size:0.76rem;color:#c8c8cc;margin-bottom:0.55rem;"
+            f"padding-bottom:0.55rem;border-bottom:1px solid #1e1e22;'>{escape(d)}</div>"
+            for d in decisions
+        )
+        st.markdown(
+            _card("This Week's Decisions", decisions_html, "#e8890c"),
+            unsafe_allow_html=True,
+        )
+
+
 def render_coach_page(
     df: pd.DataFrame,
     checkins: pd.DataFrame | None = None,
@@ -1696,6 +2058,8 @@ def render_coach_page(
     )
     progress = weekly_progress_tracker(df, checkins)
 
+    render_weekly_review(df, checkins)
+    st.divider()
     _render_todays_priority(priority)
     st.divider()
     _render_readiness(readiness)
