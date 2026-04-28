@@ -479,10 +479,9 @@ def render_weekly_insights(df: pd.DataFrame) -> None:
         st.markdown("##### Muscle Volume")
         st.markdown(f"<ul>{_insight_list(muscle_group_vol)}</ul>", unsafe_allow_html=True)
     with c4:
-        st.markdown("##### Push/Pull/Legs")
-        st.metric("Push", f"{balance['push']:.0f}%")
-        st.metric("Pull", f"{balance['pull']:.0f}%")
-        st.metric("Legs", f"{balance['legs']:.0f}%")
+        st.markdown("##### Training Split")
+        for split in list(balance.get("splits", [])):
+            st.metric(str(split["label"]), f"{float(split['score']):.1f}x")
         st.caption(balance_summary)
 
     c1, c2 = st.columns(2)

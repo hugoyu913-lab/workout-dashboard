@@ -22,23 +22,16 @@ from config.profile import (
     TARGET_RIR,
     TARGET_SETS,
     TRAINING_DAYS_PER_WEEK,
+    TRAINING_SPLIT,
 )
 from src.metrics import checkin_metrics, grade_sessions_history
 from src.recommendations import EXERCISE_RECOMMENDATIONS_PATH
 
 MUSCLE_GROUPS = ["chest", "back", "shoulders", "arms", "legs", "core"]
-FOCUS_MUSCLES = {
-    "Push": ["chest", "shoulders"],
-    "Pull": ["back"],
-    "Legs": ["legs"],
-    "Arms": ["arms", "core"],
-    "Recovery": [],
-}
-MUSCLE_TO_FOCUS = {
-    muscle: focus
-    for focus, muscles in FOCUS_MUSCLES.items()
-    for muscle in muscles
-}
+SPLIT_MUSCLES = [
+    [muscle.lower() for muscle in split]
+    for split in TRAINING_SPLIT
+]
 
 
 def _today() -> date:
@@ -299,16 +292,60 @@ def _target_muscles(checklist: list[dict[str, object]], readiness: int) -> list[
     return [str(ordered[0]["muscle_key"])] if ordered else ["chest", "back"]
 
 
-def _focus_for_muscles(muscles: list[str], readiness: int) -> tuple[str, str]:
-    if readiness < 30:
-        return "Recovery", "Readiness is below 30, so recovery protects strength retention."
-    if readiness < 50 and not muscles:
-        return "Recovery", "Readiness is low and no frequency gap is urgent."
-    first = muscles[0] if muscles else "chest"
-    focus = MUSCLE_TO_FOCUS.get(first, "Arms")
+def _split_label(muscles: list[str]) -> str:
+    return " + ".join(muscle.title() for muscle in muscles)
+
+
+def _split_score(split: list[str], checklist: list[dict[str, object]], target_muscles: list[str]) -> float:
+    by_muscle = {str(row["muscle_key"]): row for row in checklist}
+    target_set = set(target_muscles)
+    score = 0.0
+    for muscle in split:
+        row = by_muscle.get(muscle)
+        if row is None:
+            continue
+        sessions = int(row["sessions"])
+        days_since = _days_ago(row["last_date"]) if row["last_date"] is not None else 99
+        if muscle in target_set:
+            score += 50
+        score += max(0, 2 - sessions) * 18
+        score += min(days_since or 0, 10) * 2
+        if row["status"] == "Undertrained":
+            score += 25
+        elif row["status"] == "Needs attention":
+            score += 15
+        elif row["status"] == "Overreached":
+            score -= 35
+    return score
+
+
+def _best_split(checklist: list[dict[str, object]], target_muscles: list[str], readiness: int) -> tuple[list[str], str]:
+    candidates = SPLIT_MUSCLES or [["chest", "back"]]
     if readiness < 50:
-        return focus, f"{first.title()} is the easiest priority gap to address without high recovery cost."
-    return focus, f"{first.title()} has the clearest frequency or recency gap this week."
+        candidates = [split for split in candidates if "legs" not in split] or candidates
+    scored = [
+        (idx, split, _split_score(split, checklist, target_muscles))
+        for idx, split in enumerate(candidates)
+    ]
+    _, split, _ = max(scored, key=lambda item: (item[2], -item[0]))
+    return split, _split_label(split)
+
+
+def _focus_for_muscles(
+    muscles: list[str],
+    readiness: int,
+    checklist: list[dict[str, object]],
+) -> tuple[str, str, list[str]]:
+    if readiness < 30:
+        return "Recovery", "Readiness is below 30, so recovery protects strength retention.", []
+    if readiness < 50 and not muscles:
+        return "Recovery", "Readiness is low and no frequency gap is urgent.", []
+
+    split, focus = _best_split(checklist, muscles, readiness)
+    primary = muscles[0] if muscles else split[0]
+    if readiness < 50:
+        return focus, f"{focus} best covers the easiest priority gap without high recovery cost.", split
+    return focus, f"{primary.title()} has the clearest frequency, recency, or regression gap this week.", split
 
 
 def _last_performance(work: pd.DataFrame, exercise: str) -> tuple[float | None, float | None]:
@@ -387,7 +424,7 @@ def _exercise_targets(df: pd.DataFrame | None, muscles: list[str], readiness: in
 
 def generate_game_plan(df: pd.DataFrame | None, readiness_score: int, checklist: list[dict[str, object]]) -> dict[str, object]:
     muscles = [] if readiness_score < 30 else _target_muscles(checklist, readiness_score)
-    focus, reason = _focus_for_muscles(muscles, readiness_score)
+    focus, reason, split_muscles = _focus_for_muscles(muscles, readiness_score, checklist)
     if readiness_score >= 70:
         intensity = "Work to 0-1 RIR - push the last set"
     elif readiness_score >= 50:
@@ -397,7 +434,7 @@ def generate_game_plan(df: pd.DataFrame | None, readiness_score: int, checklist:
     return {
         "focus": focus,
         "reason": reason,
-        "exercises": [] if focus == "Recovery" else _exercise_targets(df, muscles, readiness_score),
+        "exercises": [] if focus == "Recovery" else _exercise_targets(df, split_muscles or muscles, readiness_score),
         "intensity": intensity,
     }
 

@@ -9,6 +9,14 @@ PHASE: str = "cut"  # cut | bulk | maintain
 TARGET_BODY_FAT: int = 10
 MIN_MUSCLE_FREQ_PER_WEEK: int = 2
 MAX_MUSCLE_FREQ_PER_WEEK: int = 4
+TRAINING_SPLIT: list[list[str]] = [
+    ["Chest", "Back"],
+    ["Shoulders", "Arms"],
+    ["Legs"],
+    ["Chest", "Arms"],
+    ["Back", "Shoulders"],
+    ["Legs"],
+]
 
 DAILY_STEPS_GOAL: int = 10000
 DAILY_CALORIES_TARGET: int = 2200

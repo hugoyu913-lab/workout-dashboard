@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from config.profile import TRAINING_SPLIT
 from src.fatigue import fatigue_risk_detector
 from src.recommendations import (
     build_next_workout,
@@ -27,10 +28,13 @@ def _empty_insights() -> dict[str, object]:
         "muscle_group_volume": [],
         "undertrained_muscle_groups": [],
         "balance": {
-            "push": 0.0,
-            "pull": 0.0,
-            "legs": 0.0,
-            "summary": "No push/pull/legs balance signal yet.",
+            "splits": [
+                {"label": " + ".join(split), "score": 0.0}
+                for split in TRAINING_SPLIT
+            ],
+            "summary": "No training split balance signal yet.",
+            "spread": 0.0,
+            "low_bucket": "Chest + Back",
         },
         "recommendations": ["Log more complete workout data before changing next week's focus."],
         "suggested_exercises": ["No exercise suggestions available yet."],
@@ -276,39 +280,47 @@ def _muscle_group_frequency(work: pd.DataFrame, latest_week: pd.Timestamp) -> li
     return flags
 
 
-def _movement_bucket(row: pd.Series) -> str:
-    category = str(row.get("Category", "")).lower()
-    muscle_group = str(row.get("MuscleGroup", "")).lower()
-    if "leg" in muscle_group or category in {
-        "squat", "leg press", "quad isolation", "hamstring isolation", "calves", "hip isolation"
-    }:
-        return "legs"
-    if "pull" in category or muscle_group == "back" or category == "biceps":
-        return "pull"
-    if "push" in category or muscle_group in {"chest", "shoulders"} or category == "triceps":
-        return "push"
-    return "other"
+def _split_label(split: list[str]) -> str:
+    return " + ".join(str(muscle).title() for muscle in split)
 
 
-def _push_pull_legs_balance(latest: pd.DataFrame) -> dict[str, object]:
-    if latest.empty:
-        return {"push": 0.0, "pull": 0.0, "legs": 0.0, "summary": "No push/pull/legs frequency signal yet."}
-    work = latest.copy()
-    work["Bucket"] = work.apply(_movement_bucket, axis=1)
-    days = work.groupby("Bucket")["Date"].nunique()
-    tracked_total = float(days.reindex(["push", "pull", "legs"]).fillna(0).sum())
-    if tracked_total <= 0:
-        return {"push": 0.0, "pull": 0.0, "legs": 0.0, "summary": "No push/pull/legs frequency detected this week."}
-    percentages = {b: float(days.get(b, 0.0) / tracked_total * 100) for b in ("push", "pull", "legs")}
-    low = min(percentages, key=percentages.get)
-    high = max(percentages, key=percentages.get)
-    spread = percentages[high] - percentages[low]
+def _training_split_balance(latest: pd.DataFrame) -> dict[str, object]:
+    split_defs = [[str(muscle).lower() for muscle in split] for split in TRAINING_SPLIT]
+    empty_splits = [{"label": _split_label(split), "score": 0.0} for split in split_defs]
+    if latest.empty or "MuscleGroup" not in latest.columns:
+        return {
+            "splits": empty_splits,
+            "summary": "No training split frequency signal yet.",
+            "spread": 0.0,
+            "low_bucket": empty_splits[0]["label"] if empty_splits else "Chest + Back",
+        }
+
+    work = latest.dropna(subset=["Date", "MuscleGroup"]).copy()
+    work["MuscleGroup"] = work["MuscleGroup"].astype(str).str.lower()
+    days_by_muscle = work.groupby("MuscleGroup")["Date"].nunique()
+    split_scores: list[dict[str, object]] = []
+    for split in split_defs:
+        values = [float(days_by_muscle.get(muscle, 0.0)) for muscle in split]
+        score = sum(values) / len(split) if split else 0.0
+        split_scores.append({"label": _split_label(split), "score": score})
+
+    if not split_scores:
+        return {"splits": [], "summary": "No training split configured.", "spread": 0.0, "low_bucket": ""}
+
+    low = min(split_scores, key=lambda row: float(row["score"]))
+    high = max(split_scores, key=lambda row: float(row["score"]))
+    spread = float(high["score"]) - float(low["score"])
     summary = (
-        "Push, pull, and legs frequency is balanced for a cut."
-        if spread <= 20
-        else f"{low.title()} frequency is low relative to {high}."
+        "Custom split frequency is balanced this week."
+        if spread <= 1
+        else f"{low['label']} is low relative to {high['label']}."
     )
-    return {**percentages, "summary": summary, "spread": spread, "low_bucket": low}
+    return {
+        "splits": split_scores,
+        "summary": summary,
+        "spread": spread,
+        "low_bucket": str(low["label"]),
+    }
 
 
 def _weekly_training_score(
@@ -378,7 +390,7 @@ def build_weekly_insights(df: pd.DataFrame) -> dict[str, object]:
     declining = _status_lines(scores, "declining", "No declining exercises detected yet.")
     muscle_groups = _muscle_group_volume(latest)
     frequency_flags = _muscle_group_frequency(work, latest_week)
-    balance = _push_pull_legs_balance(latest)
+    balance = _training_split_balance(latest)
     training_score = _weekly_training_score(scores, frequency_flags, balance)
     recommendations = build_recommendations(scores, frequency_flags, balance)
     suggested_exercises = build_suggested_exercises(frequency_flags, scores, recommendations)
