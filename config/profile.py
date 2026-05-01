@@ -33,10 +33,10 @@ IDEAL_CUT_RATE_MAX: float = 0.008
 
 # Key lifts used for strength-retention tracking, warnings, and game plan flagging
 ANCHOR_LIFTS: dict[str, list[str]] = {
-    "Chest": ["Smith Machine Incline", "Pec Deck"],
+    "Chest": ["Smith Machine Incline Press", "Pec Deck"],
     "Back": ["Lat Pulldown", "Seated Cable Row"],
     "Biceps": ["Dumbbell Curl", "Cable Curl"],
-    "Triceps": ["Tricep Pushdown", "Single Tricep Extension"],
+    "Triceps": ["Tricep Pushdown", "Single Arm Tricep Extension"],
     "Legs": ["Leg Press", "Leg Curl"],
 }
 
