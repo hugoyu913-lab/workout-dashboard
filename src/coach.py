@@ -517,10 +517,38 @@ def _filled_checkin_fields(row: pd.Series | None, fields: list[str]) -> list[str
     return filled
 
 
-def build_todays_priority(
+def _checkin_number(row: pd.Series | None, field: str) -> float | None:
+    if row is None:
+        return None
+    value = pd.to_numeric(row.get(field), errors="coerce")
+    return None if pd.isna(value) else float(value)
+
+
+def _checkin_bool(row: pd.Series | None, field: str) -> bool:
+    if row is None:
+        return False
+    value = row.get(field)
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"true", "yes", "1", "y"}
+
+
+def _recent_strength_regressions(df: pd.DataFrame | None) -> list[str]:
+    try:
+        return [
+            str(row["exercise"])
+            for row in _anchor_lift_trends(df)
+            if row.get("flag") == "Watch this lift"
+        ]
+    except Exception:
+        return []
+
+
+def build_training_decision_v2(
     df: pd.DataFrame | None,
     checkins: pd.DataFrame | None,
     today: date | None = None,
+    warnings: list[dict[str, str]] | None = None,
 ) -> dict[str, object]:
     ref = today or _today()
     readiness = compute_readiness(checkins)
@@ -530,35 +558,146 @@ def build_todays_priority(
     rotation_muscles = list(rotation.get("expected_muscles", []))
     if rotation.get("rotation_complete") and not rotation_muscles:
         rotation_muscles = list(rotation.get("next_muscles", []))
+    recommended_split = (
+        _split_label(rotation_muscles)
+        if rotation_muscles
+        else str(rotation.get("expected_today") or "Workout")
+    )
+    sleep = _checkin_number(today_row, "SleepHours")
+    energy = _checkin_number(today_row, "Energy")
+    soreness = _checkin_number(today_row, "Soreness")
+    stress = _checkin_number(today_row, "Stress")
+    steps = _checkin_number(today_row, "Steps")
+    deload_flag = _checkin_bool(today_row, "Deload")
+    regressions = _recent_strength_regressions(df)
+    recent_strength_regression = bool(regressions)
+    warning_rows = warnings
+    if warning_rows is None:
+        try:
+            warning_rows = weekly_warnings(df, checkins)
+        except Exception:
+            warning_rows = []
+    severe_recovery = _has_severe_recovery_warning(warning_rows)
+    recovery_pressure = (
+        deload_flag
+        or readiness_score < 30
+        or severe_recovery
+        or (sleep is not None and sleep < 6)
+        or (energy is not None and energy <= 3)
+        or (soreness is not None and soreness >= 8)
+        or (stress is not None and stress >= 8)
+    )
+    caution_pressure = (
+        readiness_score < 50
+        or recent_strength_regression
+        or (steps is not None and steps < 5000)
+        or (sleep is not None and sleep < 7)
+        or (energy is not None and energy <= 4)
+        or (soreness is not None and soreness >= 7)
+        or (stress is not None and stress >= 7)
+    )
+
+    if recovery_pressure:
+        decision = "Recovery"
+        recommended_split = "Recovery"
+        intensity_guidance = "Skip hard sets - walk, mobility, and recovery work only."
+        volume_guidance = "No lifting volume today unless deload work is already planned."
+    elif caution_pressure:
+        decision = "Train Smart"
+        intensity_guidance = "Work to 2-3 RIR - hold load and avoid grinders."
+        volume_guidance = "Run planned sets only; skip optional accessories."
+    else:
+        decision = "Train"
+        intensity_guidance = (
+            "Work to 0-1 RIR - push the last set"
+            if readiness_score >= 70
+            else "Work to 1-2 RIR - leave a rep in the tank"
+        )
+        volume_guidance = "Run planned volume for the recommended split."
+
+    reasons: list[str] = [f"Readiness {readiness_score}."]
+    if deload_flag:
+        reasons.append("Deload flag is active.")
+    if sleep is not None:
+        reasons.append(f"Sleep {sleep:.1f}h.")
+    if energy is not None:
+        reasons.append(f"Energy {energy:.0f}/10.")
+    if soreness is not None:
+        reasons.append(f"Soreness {soreness:.0f}/10.")
+    if stress is not None:
+        reasons.append(f"Stress {stress:.0f}/10.")
+    if steps is not None:
+        reasons.append(f"Steps {steps:,.0f}.")
+    if recent_strength_regression:
+        reasons.append(f"Anchor regression: {', '.join(regressions[:2])}.")
+    if severe_recovery:
+        reasons.append("Severe recovery warning is active.")
+    reasons.append(f"Rotation points to {recommended_split}.")
+
+    required_fields = ["SleepHours", "Energy", "Soreness", "Stress", "Steps"]
+    filled_fields = _filled_checkin_fields(today_row, required_fields)
+    if today_row is None or not rotation.get("rotation_determined"):
+        confidence_level = "Low"
+    elif len(filled_fields) == len(required_fields) and not _prep_workouts(df).empty:
+        confidence_level = "High"
+    else:
+        confidence_level = "Medium"
+
+    return {
+        "decision": decision,
+        "recommended_split": recommended_split,
+        "intensity_guidance": intensity_guidance,
+        "volume_guidance": volume_guidance,
+        "reason": " ".join(reasons),
+        "confidence_level": confidence_level,
+        "readiness_score": readiness_score,
+        "sleep": sleep,
+        "energy": energy,
+        "soreness": soreness,
+        "stress": stress,
+        "steps": steps,
+        "split_rotation": rotation,
+        "expected_muscles": rotation_muscles,
+        "recent_strength_regression": recent_strength_regression,
+        "recent_strength_regressions": regressions,
+        "severe_recovery_warning": severe_recovery,
+        "deload_flag": deload_flag,
+        "has_today_checkin": today_row is not None,
+    }
+
+
+def build_todays_priority(
+    df: pd.DataFrame | None,
+    checkins: pd.DataFrame | None,
+    today: date | None = None,
+    warnings: list[dict[str, str]] | None = None,
+) -> dict[str, object]:
+    ref = today or _today()
+    decision = build_training_decision_v2(df, checkins, ref, warnings=warnings)
+    rotation = dict(decision["split_rotation"])
+    today_row = _checkin_for_date(checkins, ref)
+    readiness_score = int(decision["readiness_score"])
+    rotation_muscles = list(decision.get("expected_muscles", []))
     rotation_known = bool(rotation.get("rotation_determined") and rotation_muscles)
-    expected_split = _split_label(rotation_muscles) if rotation_muscles else str(rotation.get("expected_today") or "Workout")
+    expected_split = str(decision["recommended_split"])
     required_fields = ["SleepHours", "Energy", "Soreness", "Stress"]
     filled_fields = _filled_checkin_fields(today_row, required_fields)
     workout_data_sufficient = not _prep_workouts(df).empty
-    try:
-        severe_recovery = _has_severe_recovery_warning(weekly_warnings(df, checkins))
-    except Exception:
-        severe_recovery = False
 
     if today_row is None:
         priority_title = "Log today's check-in first"
         action_tag = "Log Checkins"
         priority_reason = "Missing checkins lowers confidence because recovery data is incomplete."
         why = "Missing checkins lowers confidence because recovery data is incomplete."
-    elif readiness_score < 30:
+    elif decision["decision"] == "Recovery":
         priority_title = "Recovery Day"
         action_tag = "Recovery"
-        priority_reason = "Low readiness means recovery is the highest-return move today."
-        why = "Low readiness means recovery is the highest-return move today."
-    elif severe_recovery:
-        priority_title = "Recovery Day"
-        action_tag = "Recovery"
-        priority_reason = "Fatigue or regression warnings make recovery the highest-return move today."
+        priority_reason = str(decision["reason"])
         why = "Recovery now protects strength retention during the cut."
-    elif readiness_score < 50:
+    elif decision["decision"] == "Train Smart":
         priority_title = f"{expected_split} at 2-3 RIR"
         action_tag = "Train Smart"
-        priority_reason = f"Following rotation with low readiness, so keep {expected_split} conservative."
+        priority_reason = str(decision["reason"])
         why = "This keeps your split on track while preserving strength during the cut."
     else:
         priority_title = expected_split
@@ -602,6 +741,9 @@ def build_todays_priority(
         missing = ", ".join(field for field in required_fields if field not in filled_fields)
         confidence_reason = f"Rotation is known, but checkins are partial: missing {missing}."
 
+    confidence_level = confidence_level or "Low"
+    confidence_reason = confidence_reason or "Training decision confidence defaults to low."
+
     anchor_callouts: list[str] = []
     if rotation_muscles and df is not None:
         try:
@@ -631,6 +773,7 @@ def build_todays_priority(
         "rotation": rotation,
         "has_today_checkin": today_row is not None,
         "anchor_callouts": anchor_callouts,
+        "training_decision": decision,
     }
 
 
@@ -2149,9 +2292,9 @@ def render_coach_page(
 
     readiness = compute_readiness(checkins)
     checklist = weekly_muscle_checklist(df)
-    priority = build_todays_priority(df, checkins)
-    rotation = dict(priority["rotation"])
     warnings = weekly_warnings(df, checkins)
+    priority = build_todays_priority(df, checkins, warnings=warnings)
+    rotation = dict(priority["rotation"])
     fatigue = fatigue_risk_detector(df, checkins=checkins)
     fatigue_high = str(fatigue.get("risk", "")).lower() == "high"
     plan = generate_game_plan(
