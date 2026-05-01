@@ -68,22 +68,16 @@ html, body,
     border-radius: 3px !important;
 }
 
-* { font-family: 'IBM Plex Mono', monospace !important; }
-
-/* Force ALL summary elements and their pseudo-content to use
-   default font so expander arrows render correctly */
-details summary,
-details summary::before,
-details summary::after,
-details summary span,
-details summary p,
-[data-testid="stExpander"] summary,
-[data-testid="stExpander"] summary *,
-[data-testid="stExpander"] summary span,
-[data-testid="stExpander"] summary p,
-[data-baseweb="accordion"] [role="button"],
-[data-baseweb="accordion"] [role="button"] * {
-    font-family: unset !important;
+body, p, div, span, label, input, textarea, select, button,
+td, th, li, h1, h2, h3, h4, h5, h6,
+[data-testid="stMarkdownContainer"],
+[data-testid="stText"],
+[data-testid="stMetricLabel"],
+[data-testid="stMetricValue"],
+[data-testid="stWidgetLabel"],
+.stTabs [data-baseweb="tab"],
+[data-testid="stSidebar"] {
+    font-family: 'IBM Plex Mono', monospace !important;
 }
 
 /* Restore Material Symbols font so Streamlit icons render correctly */
