@@ -70,18 +70,25 @@ html, body,
 
 * { font-family: 'IBM Plex Mono', monospace !important; }
 
-[data-testid="stExpanderToggleIcon"],
-[data-testid="stExpanderToggleIcon"] *,
-button[kind="expanderHeader"] svg,
-.stExpander summary svg,
-[data-baseweb="accordion"] svg {
-    font-family: inherit !important;
+/* Force ALL summary elements and their pseudo-content to use
+   default font so expander arrows render correctly */
+details summary,
+details summary::before,
+details summary::after,
+details summary span,
+details summary p,
+[data-testid="stExpander"] summary,
+[data-testid="stExpander"] summary *,
+[data-testid="stExpander"] summary span,
+[data-testid="stExpander"] summary p,
+[data-baseweb="accordion"] [role="button"],
+[data-baseweb="accordion"] [role="button"] * {
+    font-family: unset !important;
 }
 
 /* Restore Material Symbols font so Streamlit icons render correctly */
 .material-symbols-rounded,
-[class*="material-symbols-"],
-[data-testid="stExpanderToggleIcon"] {
+[class*="material-symbols-"] {
     font-family: 'Material Symbols Rounded' !important;
 }
 
