@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 import pandas as pd
 
 
 EXERCISE_MAP_PATH = Path("config/exercise_map.csv")
+FUZZY_THRESHOLD = 80
 STANDARD_COLUMNS = [
     "Date",
     "Workout",
@@ -285,12 +287,35 @@ def _load_exercise_map(path: Path = EXERCISE_MAP_PATH) -> dict[str, dict[str, st
     return mapping
 
 
+def _fuzzy_match(raw: str, mapping: dict[str, dict[str, str]]) -> dict[str, str] | None:
+    from rapidfuzz import process, fuzz
+    result = process.extractOne(raw, list(mapping.keys()), scorer=fuzz.token_sort_ratio)
+    if result is None:
+        return None
+    matched_key, score, _ = result
+    if score >= FUZZY_THRESHOLD:
+        print(f"FUZZY MATCH: '{raw}' → '{matched_key}' (score {score})", file=sys.stderr)
+        return mapping[matched_key]
+    return None
+
+
 def _standardize_exercises(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     mapping = _load_exercise_map()
 
     normalized = df["Exercise"].map(_exercise_key)
     mapped = normalized.map(mapping)
+
+    if mapping:
+        unmatched_mask = mapped.isna()
+        if unmatched_mask.any():
+            fuzzy_cache: dict[str, dict[str, str] | None] = {}
+            for raw in normalized[unmatched_mask].unique():
+                fuzzy_cache[raw] = _fuzzy_match(raw, mapping)
+            for idx in normalized[unmatched_mask].index:
+                result = fuzzy_cache.get(normalized.at[idx])
+                if result is not None:
+                    mapped.at[idx] = result
 
     standard_names = mapped.map(
         lambda value: value.get("standard_name") if isinstance(value, dict) else None
