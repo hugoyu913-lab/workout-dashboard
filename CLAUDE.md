@@ -1,3 +1,5 @@
+/caveman
+
 # CLAUDE.md
 
 ## How to talk to me
