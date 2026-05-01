@@ -85,7 +85,31 @@ def _prep_workouts(df: pd.DataFrame | None) -> pd.DataFrame:
     for col in ("Date", "Exercise", "Weight", "Reps", "Set", "Volume", "MuscleGroup"):
         if col not in work.columns:
             work[col] = pd.NA
-    work["Date"] = pd.to_datetime(work["Date"], errors="coerce")
+    raw_dates = work["Date"].astype(str).str.strip()
+    current_year = pd.Timestamp.now().year
+    local_tz = datetime.now().astimezone().tzinfo
+
+    def parse_local_date(raw_value: str) -> pd.Timestamp:
+        raw_text = str(raw_value).strip()
+        parse_text = raw_text
+        if re.fullmatch(r"\d{1,2}/\d{1,2}", raw_text):
+            parse_text = f"{raw_text}/{current_year}"
+        parsed = pd.to_datetime(parse_text, format="mixed", errors="coerce")
+        if pd.isna(parsed):
+            parsed = pd.to_datetime(f"{raw_text}/{current_year}", format="mixed", errors="coerce")
+        if pd.isna(parsed):
+            return pd.NaT
+        timestamp = pd.Timestamp(parsed)
+        if timestamp.tzinfo is not None:
+            if local_tz is not None:
+                timestamp = timestamp.tz_convert(local_tz)
+            timestamp = timestamp.tz_localize(None)
+        else:
+            timestamp = timestamp.tz_localize(None)
+        return timestamp.normalize()
+
+    work["Date"] = raw_dates.apply(parse_local_date)
+    work["Date"] = work["Date"].dt.normalize()
     work = work.dropna(subset=["Date", "Exercise"])
     if work.empty:
         return work
