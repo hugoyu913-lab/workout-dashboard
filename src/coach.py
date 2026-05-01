@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import json
+import os
 from datetime import date, datetime, timedelta
 from html import escape
 from pathlib import Path
@@ -2142,13 +2145,76 @@ def render_checkin_form(spreadsheet_id: str | None) -> None:
         st.session_state.show_checkin_form = not st.session_state.show_checkin_form
 
     if st.session_state.show_checkin_form:
+        # --- Screenshot import (outside form) ---
+        api_key: str | None = None
+        try:
+            api_key = st.secrets.get("ANTHROPIC_API_KEY")
+        except Exception:
+            pass
+        if not api_key:
+            api_key = os.environ.get("ANTHROPIC_API_KEY")
+
+        if api_key:
+            uploaded = st.file_uploader(
+                "Upload Cal AI screenshot to auto-fill nutrition",
+                type=["png", "jpg", "jpeg"],
+                key="cal_ai_screenshot",
+            )
+            if uploaded is not None:
+                file_fp = f"_cal_ai_fp_{uploaded.name}_{uploaded.size}"
+                if file_fp not in st.session_state:
+                    st.session_state[file_fp] = True
+                    try:
+                        import anthropic
+                        prompt = """
+Extract nutrition data from this food tracking app screenshot.
+Return ONLY a JSON object with these exact keys:
+{"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
+Use integers. If a value is not visible, use 0.
+Do not include any other text.
+"""
+                        b64 = base64.b64encode(uploaded.read()).decode("utf-8")
+                        client = anthropic.Anthropic(api_key=api_key)
+                        response = client.messages.create(
+                            model="claude-opus-4-5",
+                            max_tokens=200,
+                            messages=[{
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "image",
+                                        "source": {
+                                            "type": "base64",
+                                            "media_type": uploaded.type,
+                                            "data": b64,
+                                        },
+                                    },
+                                    {"type": "text", "text": prompt},
+                                ],
+                            }],
+                        )
+                        extracted = json.loads(response.content[0].text.strip())
+                        st.session_state["_ci_calories"] = int(extracted.get("calories", 0)) or None
+                        st.session_state["_ci_protein"] = int(extracted.get("protein", 0)) or None
+                        st.session_state["_ci_carbs"] = int(extracted.get("carbs", 0)) or None
+                        st.session_state["_ci_fat"] = int(extracted.get("fat", 0)) or None
+                        st.success("Nutrition extracted — review and save")
+                    except Exception:
+                        st.warning("Could not read screenshot — enter manually")
+        else:
+            st.caption("Add ANTHROPIC_API_KEY to secrets to enable screenshot import")
+
+        for _k in ("_ci_calories", "_ci_protein", "_ci_carbs", "_ci_fat"):
+            if _k not in st.session_state:
+                st.session_state[_k] = None
+
         with st.form("checkin_form"):
             st.text_input("Date", value=today_str, disabled=True)
             bodyweight = st.number_input("Bodyweight (lbs)", min_value=100.0, max_value=400.0, step=0.1, value=None)
-            calories = st.number_input("Calories", min_value=1000, max_value=4000, step=50, value=None)
-            protein = st.number_input("Protein (g)", min_value=0, max_value=400, step=5, value=None)
-            carbs = st.number_input("Carbs (g)", min_value=0, max_value=400, step=5, value=None)
-            fat = st.number_input("Fat (g)", min_value=0, max_value=100, step=5, value=None)
+            calories = st.number_input("Calories", min_value=1000, max_value=4000, step=50, key="_ci_calories")
+            protein = st.number_input("Protein (g)", min_value=0, max_value=400, step=5, key="_ci_protein")
+            carbs = st.number_input("Carbs (g)", min_value=0, max_value=400, step=5, key="_ci_carbs")
+            fat = st.number_input("Fat (g)", min_value=0, max_value=100, step=5, key="_ci_fat")
             steps = st.number_input("Steps", min_value=0, max_value=30000, step=500, value=None)
             sleep_hours = st.number_input("Sleep Hours", min_value=0.0, max_value=12.0, step=0.5, value=None)
             energy = st.slider("Energy (1–10)", min_value=1, max_value=10, value=5)
