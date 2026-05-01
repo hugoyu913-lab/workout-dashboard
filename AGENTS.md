@@ -33,12 +33,22 @@ Workflow:
 ## No-API Review Loop
 
 For medium or large code changes:
-- Save Claude review prompt to ai_loop/review_prompt.txt.
-- Wait for user to paste Claude feedback into ai_loop/claude_feedback.txt.
+- Save review prompt to ai_loop/review_prompt.txt.
+- Wait for user to paste review feedback into ai_loop/claude_feedback.txt.
 - Read claude_feedback.txt before fixing.
 - Apply only Must Fix items.
 - Do not use API calls or paid credits.
 - Do not commit until user approves.
+
+## Reviewer Fallback
+
+If Claude web/app is unavailable, out of tokens, or the user says Claude cannot review:
+- Use ChatGPT/manual reviewer feedback instead.
+- User may paste ChatGPT review into ai_loop/claude_feedback.txt.
+- Treat it the same as Claude feedback.
+- Apply only Must Fix items.
+- Do not block progress if review is unavailable for LOW or simple MEDIUM risk changes.
+- For HIGH risk changes, require either Claude, ChatGPT, or explicit user approval to skip review.
 
 ## Auto-Trigger Review Loop
 
@@ -67,7 +77,7 @@ MEDIUM RISK:
 
 Action:
 - auto-trigger no-API review loop
-- write Claude prompt to ai_loop/review_prompt.txt
+- write review prompt to ai_loop/review_prompt.txt
 - do not commit until feedback is handled or user skips review
 
 HIGH RISK:
@@ -81,7 +91,7 @@ HIGH RISK:
 
 Action:
 - auto-trigger no-API review loop
-- require Claude feedback before commit
+- require review feedback before commit
 - apply only Must Fix items
 - rerun verification after fixes
 

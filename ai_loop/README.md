@@ -1,14 +1,14 @@
-# Free Codex ↔ Claude Review Loop
+# Free Codex ↔ Review Loop
 
 No API credits required.
 
 ## Workflow
 
 1. Codex makes code changes.
-2. Codex writes a Claude review prompt into:
+2. Codex writes a review prompt into:
    ai_loop/review_prompt.txt
-3. User copies review_prompt.txt into Claude web/app.
-4. User pastes Claude feedback into:
+3. User copies review_prompt.txt into Claude web/app, ChatGPT, or a manual reviewer workflow.
+4. User pastes review feedback into:
    ai_loop/claude_feedback.txt
 5. Codex reads claude_feedback.txt.
 6. Codex applies only Must Fix items.
@@ -25,6 +25,16 @@ No API credits required.
 - Apply only Must Fix items unless user approves Should Fix.
 - Keep commits scoped.
 - Never commit private/local files.
+
+## Reviewer Fallback
+
+If Claude web/app is unavailable, out of tokens, or the user says Claude cannot review:
+- Use ChatGPT/manual reviewer feedback instead.
+- User may paste ChatGPT review into ai_loop/claude_feedback.txt.
+- Treat it the same as Claude feedback.
+- Apply only Must Fix items.
+- Do not block progress if review is unavailable for LOW or simple MEDIUM risk changes.
+- For HIGH risk changes, require either Claude, ChatGPT, or explicit user approval to skip review.
 
 ## Auto-Trigger Review Loop
 
@@ -50,7 +60,7 @@ MEDIUM RISK:
 
 Action:
 - auto-trigger no-API review loop
-- write Claude prompt to ai_loop/review_prompt.txt
+- write review prompt to ai_loop/review_prompt.txt
 - do not commit until feedback is handled or user skips review
 
 HIGH RISK:
@@ -64,7 +74,7 @@ HIGH RISK:
 
 Action:
 - auto-trigger no-API review loop
-- require Claude feedback before commit
+- require review feedback before commit
 - apply only Must Fix items
 - rerun verification after fixes
 

@@ -188,6 +188,9 @@ def compute_readiness(checkins: pd.DataFrame | None) -> dict[str, object]:
 
     last = _latest_checkin(checkins)
     if last is not None:
+        sleep_value: float | None = None
+        energy_value: float | None = None
+
         steps = pd.to_numeric(last.get("Steps"), errors="coerce")
         if pd.notna(steps):
             steps = float(steps)
@@ -205,6 +208,7 @@ def compute_readiness(checkins: pd.DataFrame | None) -> dict[str, object]:
         sleep = pd.to_numeric(last.get("SleepHours"), errors="coerce")
         if pd.notna(sleep):
             sleep = float(sleep)
+            sleep_value = sleep
             delta = -20 if sleep < 6 else (-5 if sleep < 7 else (10 if sleep < 8 else 15))
             score += delta
             breakdown.append({"label": "Sleep", "delta": delta, "note": f"{sleep:.1f}h last night"})
@@ -226,9 +230,15 @@ def compute_readiness(checkins: pd.DataFrame | None) -> dict[str, object]:
         energy = pd.to_numeric(last.get("Energy"), errors="coerce")
         if pd.notna(energy):
             energy = float(energy)
+            energy_value = energy
             delta = -15 if energy <= 3 else (10 if energy >= 7 else 0)
             score += delta
             breakdown.append({"label": "Energy", "delta": delta, "note": f"{energy:.0f}/10"})
+
+        if sleep_value is not None and energy_value is not None and sleep_value < 6 and energy_value <= 3:
+            delta = -5
+            score += delta
+            breakdown.append({"label": "Recovery strain", "delta": delta, "note": "low sleep + low energy"})
 
     final_score = _clamp(score)
     label, subtitle, color = _score_label(final_score)

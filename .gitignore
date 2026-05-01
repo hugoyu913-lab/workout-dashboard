@@ -31,3 +31,6 @@ Thumbs.db
 .claude/
 .claude/settings.local.json
 caveman/
+ai_loop/*.ps1
+ai_loop/review_prompt.txt
+ai_loop/claude_feedback.txt
