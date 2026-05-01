@@ -1643,7 +1643,16 @@ def _anchor_lift_debug_rows(df: pd.DataFrame | None) -> list[dict[str, str]]:
 
 
 def _render_anchor_lift_debug(df: pd.DataFrame | None) -> None:
-    with st.expander("Anchor Lift Debug", expanded=False):
+    if "show_anchor_debug" not in st.session_state:
+        st.session_state.show_anchor_debug = False
+
+    if st.button(
+        "▼ Anchor Lift Debug" if st.session_state.show_anchor_debug else "▶ Anchor Lift Debug",
+        key="toggle_anchor_debug",
+    ):
+        st.session_state.show_anchor_debug = not st.session_state.show_anchor_debug
+
+    if st.session_state.show_anchor_debug:
         st.table(pd.DataFrame(_anchor_lift_debug_rows(df)))
 
 
@@ -1954,7 +1963,16 @@ def render_weekly_review(
     rs = review["recovery_summary"]
     decisions = list(review["decisions"])
 
-    with st.expander("Weekly Review", expanded=is_monday):
+    if "show_weekly_review" not in st.session_state:
+        st.session_state.show_weekly_review = is_monday
+
+    if st.button(
+        "▼ Weekly Review" if st.session_state.show_weekly_review else "▶ Weekly Review",
+        key="toggle_weekly_review",
+    ):
+        st.session_state.show_weekly_review = not st.session_state.show_weekly_review
+
+    if st.session_state.show_weekly_review:
         if int(review["checkins_this_week"]) < 5:
             st.caption("Log more checkins for weekly decisions (need 5+ days this week).")
         else:
@@ -2114,7 +2132,16 @@ def render_checkin_form(spreadsheet_id: str | None) -> None:
     except Exception:
         has_today = False
 
-    with st.expander("Log Today's Checkin", expanded=not has_today):
+    if "show_checkin_form" not in st.session_state:
+        st.session_state.show_checkin_form = not has_today
+
+    if st.button(
+        "▼ Log Today's Checkin" if st.session_state.show_checkin_form else "▶ Log Today's Checkin",
+        key="toggle_checkin_form",
+    ):
+        st.session_state.show_checkin_form = not st.session_state.show_checkin_form
+
+    if st.session_state.show_checkin_form:
         with st.form("checkin_form"):
             st.text_input("Date", value=today_str, disabled=True)
             bodyweight = st.number_input("Bodyweight (lbs)", min_value=100.0, max_value=400.0, step=0.1, value=None)
