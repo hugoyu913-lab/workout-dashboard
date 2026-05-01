@@ -1957,144 +1957,143 @@ def render_weekly_review(
     with st.expander("Weekly Review", expanded=is_monday):
         if int(review["checkins_this_week"]) < 5:
             st.caption("Log more checkins for weekly decisions (need 5+ days this week).")
-            return
+        else:
+            mf: dict[str, int] = dict(review.get("muscle_frequency", {}))
 
-        mf: dict[str, int] = dict(review.get("muscle_frequency", {}))
-
-        st.markdown("#### Weight Trend")
-        wt_status = str(wt["status"])
-        wt_color = {
-            "On Track": "#22c55e",
-            "Too Fast": "#ef4444",
-            "Too Slow": "#f59e0b",
-        }.get(wt_status, "#555560")
-        this_avg_s = f"{wt['this_week_avg']:.1f} lbs" if wt["this_week_avg"] else "—"
-        last_avg_s = f"{wt['last_week_avg']:.1f} lbs" if wt["last_week_avg"] else "—"
-        change_s = f"{wt['weekly_change']:+.2f} lbs" if wt["weekly_change"] is not None else "—"
-        rate_s = f"{abs(float(wt['rate_pct'])) * 100:.2f}%" if wt["rate_pct"] is not None else "—"
-        cols = st.columns(3)
-        cols[0].markdown(
-            _card("This Week Avg", _small_line("Bodyweight", this_avg_s), "#1e1e22"),
-            unsafe_allow_html=True,
-        )
-        cols[1].markdown(
-            _card("Last Week Avg", _small_line("Bodyweight", last_avg_s), "#1e1e22"),
-            unsafe_allow_html=True,
-        )
-        cols[2].markdown(
-            _card(
-                "Cut Rate",
-                _small_line("Change", change_s)
-                + _small_line("Rate", rate_s, wt_color)
-                + _small_line("Status", wt_status, wt_color),
-                wt_color,
-            ),
-            unsafe_allow_html=True,
-        )
-
-        st.markdown("#### Strength")
-        maintained_s = (
-            f"{ss['anchors_maintained']}/{ss['anchors_total']}" if ss["anchors_total"] else "No data"
-        )
-        delta_s = f"{float(ss['retention_delta']):+.1f}%" if ss["anchors_total"] else "—"
-        reg_list = list(ss["regressions"])
-        reg_s = ", ".join(reg_list) if reg_list else "None"
-        reg_color = "#ef4444" if reg_list else "#22c55e"
-        cols = st.columns(3)
-        cols[0].markdown(
-            _card("Anchors Maintained", _small_line("This vs last week", maintained_s), "#1e1e22"),
-            unsafe_allow_html=True,
-        )
-        cols[1].markdown(
-            _card("1RM Delta", _small_line("vs last week", delta_s), "#1e1e22"),
-            unsafe_allow_html=True,
-        )
-        cols[2].markdown(
-            _card("Regressions", _small_line("Lifts", reg_s, reg_color), reg_color),
-            unsafe_allow_html=True,
-        )
-
-        st.markdown("#### Recovery (past 7 days)")
-        sleep_s = f"{float(rs['avg_sleep']):.1f}h" if rs["avg_sleep"] is not None else "—"
-        energy_s = f"{float(rs['avg_energy']):.1f}/10" if rs["avg_energy"] is not None else "—"
-        soreness_s = f"{float(rs['avg_soreness']):.1f}/10" if rs["avg_soreness"] is not None else "—"
-        poor_sleep = int(rs["poor_sleep_days"])
-        poor_energy = int(rs["poor_energy_days"])
-        high_soreness = int(rs["high_soreness_days"])
-        cols = st.columns(3)
-        cols[0].markdown(
-            _card(
-                "Sleep",
-                _small_line("Avg", sleep_s)
-                + _small_line(
-                    f"Nights < {DAILY_SLEEP_TARGET:g}h",
-                    str(poor_sleep),
-                    "#ef4444" if poor_sleep >= 4 else "#c8c8cc",
+            st.markdown("#### Weight Trend")
+            wt_status = str(wt["status"])
+            wt_color = {
+                "On Track": "#22c55e",
+                "Too Fast": "#ef4444",
+                "Too Slow": "#f59e0b",
+            }.get(wt_status, "#555560")
+            this_avg_s = f"{wt['this_week_avg']:.1f} lbs" if wt["this_week_avg"] else "—"
+            last_avg_s = f"{wt['last_week_avg']:.1f} lbs" if wt["last_week_avg"] else "—"
+            change_s = f"{wt['weekly_change']:+.2f} lbs" if wt["weekly_change"] is not None else "—"
+            rate_s = f"{abs(float(wt['rate_pct'])) * 100:.2f}%" if wt["rate_pct"] is not None else "—"
+            cols = st.columns(3)
+            cols[0].markdown(
+                _card("This Week Avg", _small_line("Bodyweight", this_avg_s), "#1e1e22"),
+                unsafe_allow_html=True,
+            )
+            cols[1].markdown(
+                _card("Last Week Avg", _small_line("Bodyweight", last_avg_s), "#1e1e22"),
+                unsafe_allow_html=True,
+            )
+            cols[2].markdown(
+                _card(
+                    "Cut Rate",
+                    _small_line("Change", change_s)
+                    + _small_line("Rate", rate_s, wt_color)
+                    + _small_line("Status", wt_status, wt_color),
+                    wt_color,
                 ),
-                "#ef4444" if poor_sleep >= 4 else "#1e1e22",
-            ),
-            unsafe_allow_html=True,
-        )
-        cols[1].markdown(
-            _card(
-                "Energy",
-                _small_line("Avg", energy_s)
-                + _small_line(
-                    "Days ≤ 3",
-                    str(poor_energy),
-                    "#ef4444" if poor_energy >= 4 else "#c8c8cc",
-                ),
-                "#ef4444" if poor_energy >= 4 else "#1e1e22",
-            ),
-            unsafe_allow_html=True,
-        )
-        cols[2].markdown(
-            _card(
-                "Soreness",
-                _small_line("Avg", soreness_s)
-                + _small_line(
-                    "Days ≥ 4",
-                    str(high_soreness),
-                    "#ef4444" if high_soreness >= 4 else "#c8c8cc",
-                ),
-                "#ef4444" if high_soreness >= 4 else "#1e1e22",
-            ),
-            unsafe_allow_html=True,
-        )
+                unsafe_allow_html=True,
+            )
 
-        if mf:
-            st.markdown("#### Training Frequency (past 7 days)")
-            mf_order = [
-                ("Chest", "chest"), ("Back", "back"), ("Shoulders", "shoulders"),
-                ("Biceps", "biceps"), ("Triceps", "triceps"), ("Abs", "abs"),
-                ("Quads", "quads"), ("Hamstrings", "hamstrings"), ("Glutes", "glutes"),
-                ("Calves", "calves"),
-            ]
-            for row_start in range(0, len(mf_order), 5):
-                row_muscles = mf_order[row_start:row_start + 5]
-                cols = st.columns(5)
-                for col, (label, key) in zip(cols, row_muscles):
-                    sessions = mf.get(key, 0)
-                    if sessions == 0:
-                        freq_color = "#555560"
-                    elif sessions == 1:
-                        freq_color = "#f59e0b"
-                    else:
-                        freq_color = "#22c55e"
-                    col.markdown(
-                        _card(label, _small_line("Sessions", str(sessions), freq_color), freq_color),
-                        unsafe_allow_html=True,
-                    )
+            st.markdown("#### Strength")
+            maintained_s = (
+                f"{ss['anchors_maintained']}/{ss['anchors_total']}" if ss["anchors_total"] else "No data"
+            )
+            delta_s = f"{float(ss['retention_delta']):+.1f}%" if ss["anchors_total"] else "—"
+            reg_list = list(ss["regressions"])
+            reg_s = ", ".join(reg_list) if reg_list else "None"
+            reg_color = "#ef4444" if reg_list else "#22c55e"
+            cols = st.columns(3)
+            cols[0].markdown(
+                _card("Anchors Maintained", _small_line("This vs last week", maintained_s), "#1e1e22"),
+                unsafe_allow_html=True,
+            )
+            cols[1].markdown(
+                _card("1RM Delta", _small_line("vs last week", delta_s), "#1e1e22"),
+                unsafe_allow_html=True,
+            )
+            cols[2].markdown(
+                _card("Regressions", _small_line("Lifts", reg_s, reg_color), reg_color),
+                unsafe_allow_html=True,
+            )
 
-        decisions_html = "".join(
-            f"<div style='font-size:0.76rem;color:#c8c8cc;margin-bottom:0.55rem;"
-            f"padding-bottom:0.55rem;border-bottom:1px solid #1e1e22;'>{escape(d)}</div>"
-            for d in decisions
-        )
-        st.markdown(
-            _card("This Week's Decisions", decisions_html, "#e8890c"),
-            unsafe_allow_html=True,
-        )
+            st.markdown("#### Recovery (past 7 days)")
+            sleep_s = f"{float(rs['avg_sleep']):.1f}h" if rs["avg_sleep"] is not None else "—"
+            energy_s = f"{float(rs['avg_energy']):.1f}/10" if rs["avg_energy"] is not None else "—"
+            soreness_s = f"{float(rs['avg_soreness']):.1f}/10" if rs["avg_soreness"] is not None else "—"
+            poor_sleep = int(rs["poor_sleep_days"])
+            poor_energy = int(rs["poor_energy_days"])
+            high_soreness = int(rs["high_soreness_days"])
+            cols = st.columns(3)
+            cols[0].markdown(
+                _card(
+                    "Sleep",
+                    _small_line("Avg", sleep_s)
+                    + _small_line(
+                        f"Nights < {DAILY_SLEEP_TARGET:g}h",
+                        str(poor_sleep),
+                        "#ef4444" if poor_sleep >= 4 else "#c8c8cc",
+                    ),
+                    "#ef4444" if poor_sleep >= 4 else "#1e1e22",
+                ),
+                unsafe_allow_html=True,
+            )
+            cols[1].markdown(
+                _card(
+                    "Energy",
+                    _small_line("Avg", energy_s)
+                    + _small_line(
+                        "Days ≤ 3",
+                        str(poor_energy),
+                        "#ef4444" if poor_energy >= 4 else "#c8c8cc",
+                    ),
+                    "#ef4444" if poor_energy >= 4 else "#1e1e22",
+                ),
+                unsafe_allow_html=True,
+            )
+            cols[2].markdown(
+                _card(
+                    "Soreness",
+                    _small_line("Avg", soreness_s)
+                    + _small_line(
+                        "Days ≥ 4",
+                        str(high_soreness),
+                        "#ef4444" if high_soreness >= 4 else "#c8c8cc",
+                    ),
+                    "#ef4444" if high_soreness >= 4 else "#1e1e22",
+                ),
+                unsafe_allow_html=True,
+            )
+
+            if mf:
+                st.markdown("#### Training Frequency (past 7 days)")
+                mf_order = [
+                    ("Chest", "chest"), ("Back", "back"), ("Shoulders", "shoulders"),
+                    ("Biceps", "biceps"), ("Triceps", "triceps"), ("Abs", "abs"),
+                    ("Quads", "quads"), ("Hamstrings", "hamstrings"), ("Glutes", "glutes"),
+                    ("Calves", "calves"),
+                ]
+                for row_start in range(0, len(mf_order), 5):
+                    row_muscles = mf_order[row_start:row_start + 5]
+                    cols = st.columns(5)
+                    for col, (label, key) in zip(cols, row_muscles):
+                        sessions = mf.get(key, 0)
+                        if sessions == 0:
+                            freq_color = "#555560"
+                        elif sessions == 1:
+                            freq_color = "#f59e0b"
+                        else:
+                            freq_color = "#22c55e"
+                        col.markdown(
+                            _card(label, _small_line("Sessions", str(sessions), freq_color), freq_color),
+                            unsafe_allow_html=True,
+                        )
+
+            decisions_html = "".join(
+                f"<div style='font-size:0.76rem;color:#c8c8cc;margin-bottom:0.55rem;"
+                f"padding-bottom:0.55rem;border-bottom:1px solid #1e1e22;'>{escape(d)}</div>"
+                for d in decisions
+            )
+            st.markdown(
+                _card("This Week's Decisions", decisions_html, "#e8890c"),
+                unsafe_allow_html=True,
+            )
 
 
 def render_checkin_form(spreadsheet_id: str | None) -> None:
@@ -2162,6 +2161,9 @@ def render_coach_page(
     checkins: pd.DataFrame | None = None,
     spreadsheet_id: str | None = None,
 ) -> None:
+    render_checkin_form(spreadsheet_id)
+    st.divider()
+
     readiness = compute_readiness(checkins)
     checklist = weekly_muscle_checklist(df)
     priority = build_todays_priority(df, checkins)
@@ -2180,8 +2182,6 @@ def render_coach_page(
     )
     progress = weekly_progress_tracker(df, checkins)
 
-    render_checkin_form(spreadsheet_id)
-    st.divider()
     render_weekly_review(df, checkins)
     st.divider()
     _render_todays_priority(priority)
