@@ -2321,6 +2321,13 @@ def render_checkin_form(spreadsheet_id: str | None) -> None:
                 st.error(str(exc))
 
 
+def _render_coach_section(label: str, render_fn) -> None:
+    try:
+        render_fn()
+    except Exception as exc:
+        st.error(f"{label} could not render: {exc}")
+
+
 def render_coach_page(
     df: pd.DataFrame,
     checkins: pd.DataFrame | None = None,
@@ -2347,25 +2354,25 @@ def render_coach_page(
     )
     progress = weekly_progress_tracker(df, checkins)
 
-    render_weekly_review(df, checkins)
+    _render_coach_section("Weekly review", lambda: render_weekly_review(df, checkins))
     st.divider()
-    _render_todays_priority(priority)
+    _render_coach_section("Today's priority", lambda: _render_todays_priority(priority))
     st.divider()
-    _render_readiness(readiness)
-    _render_checkins_status(checkins)
+    _render_coach_section("Readiness", lambda: _render_readiness(readiness))
+    _render_coach_section("Checkins status", lambda: _render_checkins_status(checkins))
     st.divider()
-    _render_split_rotation(rotation)
+    _render_coach_section("Split rotation", lambda: _render_split_rotation(rotation))
     st.divider()
-    _render_today_targets(checkins, spreadsheet_id)
+    _render_coach_section("Today's targets", lambda: _render_today_targets(checkins, spreadsheet_id))
     st.divider()
-    _render_checklist(checklist)
+    _render_coach_section("Muscle group checklist", lambda: _render_checklist(checklist))
     st.divider()
-    render_anchor_lift_trends(df)
+    _render_coach_section("Anchor lift trends", lambda: render_anchor_lift_trends(df))
     st.divider()
-    _render_game_plan(plan)
+    _render_coach_section("Game plan", lambda: _render_game_plan(plan))
     st.divider()
-    _render_progress(progress)
+    _render_coach_section("Weekly progress", lambda: _render_progress(progress))
     st.divider()
-    _render_warnings(warnings)
+    _render_coach_section("Weekly warnings", lambda: _render_warnings(warnings))
     st.divider()
-    _render_anchor_lift_debug(df)
+    _render_coach_section("Anchor lift debug", lambda: _render_anchor_lift_debug(df))
