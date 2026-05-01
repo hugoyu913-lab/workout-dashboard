@@ -7,7 +7,6 @@ import pandas as pd
 import streamlit as st
 
 from src.charts import (
-    bar_checkin_macros,
     bar_checkin_sleep,
     bar_checkin_steps,
     bar_muscle_group_frequency,
@@ -393,8 +392,8 @@ def render_bodyweight_recovery(checkins: pd.DataFrame, workout_df: pd.DataFrame)
             checkins_placeholder(
                 "Bodyweight Trend",
                 "Add a Google Sheet tab named 'Checkins' with columns: "
-                "Date, Bodyweight, Calories, Protein, Carbs, Fat, Steps, "
-                "SleepHours, Energy, Soreness, Stress, Deload, Notes",
+                "Date, Bodyweight, Steps, SleepHours, Energy, Soreness, "
+                "Stress, Deload, Notes",
             )
         with c2:
             checkins_placeholder(
@@ -407,7 +406,7 @@ def render_bodyweight_recovery(checkins: pd.DataFrame, workout_df: pd.DataFrame)
         metrics = checkin_metrics(checkins)
         retention = strength_retention_score(workout_df)
 
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3 = st.columns(3)
         c1.metric(
             "7-Day Bodyweight",
             "0" if pd.isna(metrics["bodyweight_7day_avg"]) else f"{float(metrics['bodyweight_7day_avg']):.1f} lbs",
@@ -417,10 +416,6 @@ def render_bodyweight_recovery(checkins: pd.DataFrame, workout_df: pd.DataFrame)
             "0" if pd.isna(metrics["weekly_weight_loss_rate"]) else f"{float(metrics['weekly_weight_loss_rate']):.1f} lbs/wk",
         )
         c3.metric(
-            "Protein",
-            "0" if pd.isna(metrics["average_protein"]) else f"{float(metrics['average_protein']):.0f} g",
-        )
-        c4.metric(
             "Sleep",
             "0" if pd.isna(metrics["average_sleep"]) else f"{float(metrics['average_sleep']):.1f} h",
         )
@@ -445,7 +440,6 @@ def render_bodyweight_recovery(checkins: pd.DataFrame, workout_df: pd.DataFrame)
             st.plotly_chart(bar_checkin_steps(checkins), use_container_width=True)
         with chart_b:
             st.plotly_chart(bar_checkin_sleep(checkins), use_container_width=True)
-        st.plotly_chart(bar_checkin_macros(checkins), use_container_width=True)
     except Exception as exc:
         st.warning(f"Could not render bodyweight/recovery section: {exc}")
 

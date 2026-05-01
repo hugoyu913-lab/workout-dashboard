@@ -17,8 +17,7 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 _WRITE_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 CHECKINS_SHEET_NAME = "checkins"
 _CHECKIN_COLUMNS = [
-    "Date", "Bodyweight", "Calories", "Protein", "Carbs", "Fat",
-    "Steps", "SleepHours", "Energy", "Soreness", "Stress", "Deload", "Notes",
+    "Date", "Bodyweight", "Steps", "SleepHours", "Energy", "Soreness", "Stress", "Deload", "Notes",
 ]
 
 # Matches "m/d" or "m/d/yy" or "m/d/yyyy" anywhere in a string
@@ -257,7 +256,9 @@ def append_checkin_row(spreadsheet_id: str, row: dict) -> None:
     if worksheet is None:
         raise GoogleSheetsError("Checkins worksheet not found.")
 
-    row_values = [row.get(col, "") for col in _CHECKIN_COLUMNS]
+    headers = [str(col).strip() for col in worksheet.row_values(1)]
+    columns = headers if "Date" in headers else _CHECKIN_COLUMNS
+    row_values = [row.get(col, "") for col in columns]
     today_str = str(row.get("Date", ""))
     col_a = worksheet.col_values(1)
     for i, cell in enumerate(col_a):

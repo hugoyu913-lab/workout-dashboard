@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import base64
-import json
-import os
 from datetime import date, datetime, timedelta
 from html import escape
 from pathlib import Path
@@ -14,10 +11,6 @@ from config.profile import (
     ANCHOR_LIFTS,
     CUT_RATE_MAX,
     CUT_RATE_MIN,
-    DAILY_CALORIES_TARGET,
-    DAILY_CARBS_TARGET,
-    DAILY_FAT_TARGET,
-    DAILY_PROTEIN_TARGET,
     DAILY_SLEEP_MINIMUM,
     DAILY_SLEEP_TARGET,
     DAILY_STEPS_TARGET,
@@ -986,9 +979,7 @@ def weekly_progress_tracker(df: pd.DataFrame | None, checkins: pd.DataFrame | No
 
     recovery_avg = None
     avg_steps = None
-    avg_protein = None
     avg_sleep = None
-    avg_calories = None
     all_targets_days = 0
     perfect_streak = 0
     c = _prep_checkins(checkins)
@@ -1007,24 +998,16 @@ def weekly_progress_tracker(df: pd.DataFrame | None, checkins: pd.DataFrame | No
             if "Steps" in week_c.columns:
                 val = pd.to_numeric(week_c["Steps"], errors="coerce").dropna().mean()
                 avg_steps = None if pd.isna(val) else round(float(val))
-            if "Protein" in week_c.columns:
-                val = pd.to_numeric(week_c["Protein"], errors="coerce").dropna().mean()
-                avg_protein = None if pd.isna(val) else round(float(val), 1)
             if "SleepHours" in week_c.columns:
                 val = pd.to_numeric(week_c["SleepHours"], errors="coerce").dropna().mean()
                 avg_sleep = None if pd.isna(val) else round(float(val), 1)
-            if "Calories" in week_c.columns:
-                val = pd.to_numeric(week_c["Calories"], errors="coerce").dropna().mean()
-                avg_calories = None if pd.isna(val) else round(float(val))
 
-            target_cols = ["Steps", "Calories", "Protein", "SleepHours"]
+            target_cols = ["Steps", "SleepHours"]
             if all(col in week_c.columns for col in target_cols):
                 complete = week_c.dropna(subset=target_cols).copy()
                 if not complete.empty:
                     hit = (
                         (complete["Steps"] >= DAILY_STEPS_TARGET)
-                        & (complete["Calories"].between(DAILY_CALORIES_TARGET * 0.9, DAILY_CALORIES_TARGET * 1.1))
-                        & (complete["Protein"] >= DAILY_PROTEIN_TARGET)
                         & (complete["SleepHours"] >= DAILY_SLEEP_MINIMUM)
                     )
                     all_targets_days = int(hit.sum())
@@ -1034,8 +1017,6 @@ def weekly_progress_tracker(df: pd.DataFrame | None, checkins: pd.DataFrame | No
                 for row in complete_all.itertuples(index=False):
                     if (
                         float(getattr(row, "Steps")) >= DAILY_STEPS_TARGET
-                        and DAILY_CALORIES_TARGET * 0.9 <= float(getattr(row, "Calories")) <= DAILY_CALORIES_TARGET * 1.1
-                        and float(getattr(row, "Protein")) >= DAILY_PROTEIN_TARGET
                         and float(getattr(row, "SleepHours")) >= DAILY_SLEEP_MINIMUM
                     ):
                         perfect_streak += 1
@@ -1050,9 +1031,7 @@ def weekly_progress_tracker(df: pd.DataFrame | None, checkins: pd.DataFrame | No
         "cut_pace": cut_pace_value,
         "recovery_avg": recovery_avg,
         "avg_steps": avg_steps,
-        "avg_protein": avg_protein,
         "avg_sleep": avg_sleep,
-        "avg_calories": avg_calories,
         "all_targets_days": all_targets_days,
         "perfect_streak": perfect_streak,
         "checkins_rows": len(c),
@@ -1121,26 +1100,6 @@ def weekly_warnings(df: pd.DataFrame | None, checkins: pd.DataFrame | None) -> l
                     "action": "Prioritize sleep tonight.",
                 })
 
-        if "Protein" in c.columns:
-            protein = pd.to_numeric(c["Protein"], errors="coerce").dropna()
-            if len(protein) >= 3 and protein.tail(3).lt(DAILY_PROTEIN_TARGET).all():
-                warnings.append({
-                    "icon": "🥤",
-                    "title": "Protein consistently low",
-                    "explanation": "Protein has been below target for 3 straight days.",
-                    "action": "Add a shake post-workout.",
-                })
-
-        if "Calories" in c.columns:
-            calories = pd.to_numeric(c["Calories"], errors="coerce").dropna()
-            if len(calories) >= 3 and calories.tail(3).lt(DAILY_CALORIES_TARGET * 0.7).all():
-                warnings.append({
-                    "icon": "🍽️",
-                    "title": "Deficit too deep",
-                    "explanation": "Calories have been under 70% of target for 3 straight days.",
-                    "action": "You're risking muscle loss - increase food intake.",
-                })
-
         metrics = checkin_metrics(c)
         pace = metrics.get("weekly_weight_loss_rate")
         current_weight = metrics.get("bodyweight_7day_avg")
@@ -1151,14 +1110,14 @@ def weekly_warnings(df: pd.DataFrame | None, checkins: pd.DataFrame | None) -> l
                     "icon": "⚡",
                     "title": "Cut pace too aggressive",
                     "explanation": f"Bodyweight is dropping about {pct:.1f}% per week.",
-                    "action": "Increase calories by 200 - too aggressive.",
+                    "action": "Add recovery resources before pushing intensity.",
                 })
             elif pct < 0.3:
                 warnings.append({
                     "icon": "📉",
                     "title": "Cut pace stalled",
                     "explanation": f"Bodyweight is dropping about {pct:.1f}% per week.",
-                    "action": "Reduce calories by 150 - cut stalled.",
+                    "action": "Review activity, sleep, and weekly consistency.",
                 })
 
         week_start, _ = _week_bounds(today)
@@ -1244,10 +1203,6 @@ def _render_today_targets(checkins: pd.DataFrame | None, spreadsheet_id: str | N
 
     targets = [
         ("STEPS", "Steps", DAILY_STEPS_TARGET, ""),
-        ("CALORIES", "Calories", DAILY_CALORIES_TARGET, ""),
-        ("PROTEIN", "Protein", DAILY_PROTEIN_TARGET, "g"),
-        ("CARBS", "Carbs", DAILY_CARBS_TARGET, "g"),
-        ("FAT", "Fat", DAILY_FAT_TARGET, "g"),
         ("SLEEP", "SleepHours", DAILY_SLEEP_TARGET, "h"),
     ]
 
@@ -1738,9 +1693,7 @@ def _render_progress(progress: dict[str, object]) -> None:
     empty_label = "No checkin rows" if progress.get("checkins_rows", 0) == 0 else "Not filled"
     lifestyle_rows = [
         ("Avg daily steps", empty_label if progress["avg_steps"] is None else f"{progress['avg_steps']:,.0f} / {DAILY_STEPS_TARGET:,}", None if progress["avg_steps"] is None else float(progress["avg_steps"]), DAILY_STEPS_TARGET * 0.9, DAILY_STEPS_TARGET * 0.7),
-        ("Avg protein", empty_label if progress["avg_protein"] is None else f"{progress['avg_protein']:.0f}g / {DAILY_PROTEIN_TARGET}g", None if progress["avg_protein"] is None else float(progress["avg_protein"]), DAILY_PROTEIN_TARGET * 0.9, DAILY_PROTEIN_TARGET * 0.7),
         ("Avg sleep", empty_label if progress["avg_sleep"] is None else f"{progress['avg_sleep']:.1f}h / {DAILY_SLEEP_TARGET:g}h", None if progress["avg_sleep"] is None else float(progress["avg_sleep"]), DAILY_SLEEP_TARGET * 0.9, DAILY_SLEEP_MINIMUM),
-        ("Avg calories", empty_label if progress["avg_calories"] is None else f"{progress['avg_calories']:,.0f} / {DAILY_CALORIES_TARGET:,}", None if progress["avg_calories"] is None else 100 - abs(float(progress["avg_calories"]) - DAILY_CALORIES_TARGET) / DAILY_CALORIES_TARGET * 100, 90, 70),
         ("All-target days", f"{progress['all_targets_days']} this week", float(progress["all_targets_days"]), 4, 2),
         ("Perfect streak", f"{progress['perfect_streak']} days", float(progress["perfect_streak"]), 3, 1),
     ]
@@ -1916,21 +1869,19 @@ def build_weekly_review(
 
     if rate_pct is not None and rp > CUT_RATE_MAX and rd < -5:
         decisions.append(
-            "Weight dropping too fast and strength declining — add 150 calories"
+            "Weight dropping too fast and strength declining — consider reducing training volume"
         )
     elif rate_pct is not None and rp > CUT_RATE_MAX:
         decisions.append(
-            "Cut pace aggressive — consider adding 100 calories or one higher-carb day"
+            "Cut pace aggressive — consider a maintenance day or reducing cardio"
         )
-    if len(decisions) < 3 and rate_pct is not None and rp < CUT_RATE_MIN and recovery_good:
-        decisions.append("Cut pace slow and recovery strong — reduce calories by 100")
     if len(decisions) < 3 and avg_sleep is not None and avg_sleep < 6.5 and poor_sleep_days >= 4:
         decisions.append(
             "Sleep is consistently low — address before any training or diet changes"
         )
     if len(decisions) < 3 and poor_energy_days >= 4:
         decisions.append(
-            "Energy low most of the week — check calories and sleep before increasing intensity"
+            "Energy low most of the week — check sleep and recovery before increasing intensity"
         )
     if (
         len(decisions) < 3
@@ -2145,76 +2096,9 @@ def render_checkin_form(spreadsheet_id: str | None) -> None:
         st.session_state.show_checkin_form = not st.session_state.show_checkin_form
 
     if st.session_state.show_checkin_form:
-        # --- Screenshot import (outside form) ---
-        api_key: str | None = None
-        try:
-            api_key = st.secrets.get("ANTHROPIC_API_KEY")
-        except Exception:
-            pass
-        if not api_key:
-            api_key = os.environ.get("ANTHROPIC_API_KEY")
-
-        if api_key:
-            uploaded = st.file_uploader(
-                "Upload Cal AI screenshot to auto-fill nutrition",
-                type=["png", "jpg", "jpeg"],
-                key="cal_ai_screenshot",
-            )
-            if uploaded is not None:
-                file_fp = f"_cal_ai_fp_{uploaded.name}_{uploaded.size}"
-                if file_fp not in st.session_state:
-                    st.session_state[file_fp] = True
-                    try:
-                        import anthropic
-                        prompt = """
-Extract nutrition data from this food tracking app screenshot.
-Return ONLY a JSON object with these exact keys:
-{"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
-Use integers. If a value is not visible, use 0.
-Do not include any other text.
-"""
-                        b64 = base64.b64encode(uploaded.read()).decode("utf-8")
-                        client = anthropic.Anthropic(api_key=api_key)
-                        response = client.messages.create(
-                            model="claude-opus-4-5",
-                            max_tokens=200,
-                            messages=[{
-                                "role": "user",
-                                "content": [
-                                    {
-                                        "type": "image",
-                                        "source": {
-                                            "type": "base64",
-                                            "media_type": uploaded.type,
-                                            "data": b64,
-                                        },
-                                    },
-                                    {"type": "text", "text": prompt},
-                                ],
-                            }],
-                        )
-                        extracted = json.loads(response.content[0].text.strip())
-                        st.session_state["_ci_calories"] = int(extracted.get("calories", 0)) or None
-                        st.session_state["_ci_protein"] = int(extracted.get("protein", 0)) or None
-                        st.session_state["_ci_carbs"] = int(extracted.get("carbs", 0)) or None
-                        st.session_state["_ci_fat"] = int(extracted.get("fat", 0)) or None
-                        st.success("Nutrition extracted — review and save")
-                    except Exception:
-                        st.warning("Could not read screenshot — enter manually")
-        else:
-            st.caption("Add ANTHROPIC_API_KEY to secrets to enable screenshot import")
-
-        for _k in ("_ci_calories", "_ci_protein", "_ci_carbs", "_ci_fat"):
-            if _k not in st.session_state:
-                st.session_state[_k] = None
-
         with st.form("checkin_form"):
             st.text_input("Date", value=today_str, disabled=True)
             bodyweight = st.number_input("Bodyweight (lbs)", min_value=100.0, max_value=400.0, step=0.1, value=None)
-            calories = st.number_input("Calories", min_value=1000, max_value=4000, step=50, key="_ci_calories")
-            protein = st.number_input("Protein (g)", min_value=0, max_value=400, step=5, key="_ci_protein")
-            carbs = st.number_input("Carbs (g)", min_value=0, max_value=400, step=5, key="_ci_carbs")
-            fat = st.number_input("Fat (g)", min_value=0, max_value=100, step=5, key="_ci_fat")
             steps = st.number_input("Steps", min_value=0, max_value=30000, step=500, value=None)
             sleep_hours = st.number_input("Sleep Hours", min_value=0.0, max_value=12.0, step=0.5, value=None)
             energy = st.slider("Energy (1–10)", min_value=1, max_value=10, value=5)
@@ -2229,10 +2113,6 @@ Do not include any other text.
             row = {
                 "Date": today_str,
                 "Bodyweight": bodyweight if bodyweight is not None else "",
-                "Calories": calories if calories is not None else "",
-                "Protein": protein if protein is not None else "",
-                "Carbs": carbs if carbs is not None else "",
-                "Fat": fat if fat is not None else "",
                 "Steps": steps if steps is not None else "",
                 "SleepHours": sleep_hours if sleep_hours is not None else "",
                 "Energy": energy,
