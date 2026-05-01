@@ -29,6 +29,7 @@ from config.profile import (
 from src.metrics import checkin_metrics, grade_sessions_history
 from src.recommendations import EXERCISE_RECOMMENDATIONS_PATH
 from src.fatigue import fatigue_risk_detector
+from src.sheets_client import append_checkin_row
 
 MUSCLE_GROUPS = ["chest", "back", "shoulders", "arms", "legs", "core"]
 SPLIT_MUSCLES = [
@@ -306,6 +307,38 @@ def weekly_muscle_checklist(df: pd.DataFrame | None, ref: date | None = None) ->
             "trend": _muscle_group_trend(all_rows),
         })
     return rows
+
+
+def build_weekly_muscle_frequency(df: pd.DataFrame | None) -> dict[str, int]:
+    work = _prep_workouts(df)
+    today = _today()
+    cutoff = today - timedelta(days=6)
+    raw: dict[str, int] = {}
+    if not work.empty:
+        window = work[
+            (work["Date"].dt.date >= cutoff) &
+            (work["Date"].dt.date <= today)
+        ]
+        if not window.empty:
+            raw = (
+                window.groupby("MuscleGroup")["Date"]
+                .apply(lambda s: s.dt.date.nunique())
+                .to_dict()
+            )
+    arms = raw.get("arms", 0)
+    legs = raw.get("legs", 0)
+    return {
+        "chest": raw.get("chest", 0),
+        "back": raw.get("back", 0),
+        "shoulders": raw.get("shoulders", 0),
+        "biceps": arms,
+        "triceps": arms,
+        "quads": legs,
+        "hamstrings": legs,
+        "glutes": legs,
+        "calves": legs,
+        "abs": raw.get("core", 0),
+    }
 
 
 def _load_exercise_recs(path: Path = EXERCISE_RECOMMENDATIONS_PATH) -> pd.DataFrame:
@@ -1897,10 +1930,13 @@ def build_weekly_review(
     if not decisions:
         decisions.append("Insufficient data for weekly decision")
 
+    muscle_frequency = build_weekly_muscle_frequency(df)
+
     return {
         "weight_trend": weight_trend,
         "strength_summary": strength_summary,
         "recovery_summary": recovery_summary,
+        "muscle_frequency": muscle_frequency,
         "decisions": decisions,
         "checkins_this_week": checkins_this_week,
     }
@@ -1922,6 +1958,8 @@ def render_weekly_review(
         if int(review["checkins_this_week"]) < 5:
             st.caption("Log more checkins for weekly decisions (need 5+ days this week).")
             return
+
+        mf: dict[str, int] = dict(review.get("muscle_frequency", {}))
 
         st.markdown("#### Weight Trend")
         wt_status = str(wt["status"])
@@ -2024,6 +2062,30 @@ def render_weekly_review(
             unsafe_allow_html=True,
         )
 
+        if mf:
+            st.markdown("#### Training Frequency (past 7 days)")
+            mf_order = [
+                ("Chest", "chest"), ("Back", "back"), ("Shoulders", "shoulders"),
+                ("Biceps", "biceps"), ("Triceps", "triceps"), ("Abs", "abs"),
+                ("Quads", "quads"), ("Hamstrings", "hamstrings"), ("Glutes", "glutes"),
+                ("Calves", "calves"),
+            ]
+            for row_start in range(0, len(mf_order), 5):
+                row_muscles = mf_order[row_start:row_start + 5]
+                cols = st.columns(5)
+                for col, (label, key) in zip(cols, row_muscles):
+                    sessions = mf.get(key, 0)
+                    if sessions == 0:
+                        freq_color = "#555560"
+                    elif sessions == 1:
+                        freq_color = "#f59e0b"
+                    else:
+                        freq_color = "#22c55e"
+                    col.markdown(
+                        _card(label, _small_line("Sessions", str(sessions), freq_color), freq_color),
+                        unsafe_allow_html=True,
+                    )
+
         decisions_html = "".join(
             f"<div style='font-size:0.76rem;color:#c8c8cc;margin-bottom:0.55rem;"
             f"padding-bottom:0.55rem;border-bottom:1px solid #1e1e22;'>{escape(d)}</div>"
@@ -2033,6 +2095,66 @@ def render_weekly_review(
             _card("This Week's Decisions", decisions_html, "#e8890c"),
             unsafe_allow_html=True,
         )
+
+
+def render_checkin_form(spreadsheet_id: str | None) -> None:
+    today = _today()
+    today_str = str(today)
+    has_today = False
+    if spreadsheet_id is None:
+        st.info("No spreadsheet ID — cannot log checkin.")
+        return
+
+    # Determine if today already logged (read from cached checkins via session state if available)
+    # We pull a quick check from any already-loaded checkins in the page context
+    try:
+        from src.sheets_client import load_checkins_worksheet
+        existing = load_checkins_worksheet(spreadsheet_id)
+        if not existing.empty and "Date" in existing.columns:
+            has_today = today_str in existing["Date"].astype(str).str.strip().values
+    except Exception:
+        has_today = False
+
+    with st.expander("Log Today's Checkin", expanded=not has_today):
+        with st.form("checkin_form"):
+            st.text_input("Date", value=today_str, disabled=True)
+            bodyweight = st.number_input("Bodyweight (lbs)", min_value=100.0, max_value=400.0, step=0.1, value=None)
+            calories = st.number_input("Calories", min_value=1000, max_value=4000, step=50, value=None)
+            protein = st.number_input("Protein (g)", min_value=0, max_value=400, step=5, value=None)
+            carbs = st.number_input("Carbs (g)", min_value=0, max_value=400, step=5, value=None)
+            fat = st.number_input("Fat (g)", min_value=0, max_value=100, step=5, value=None)
+            steps = st.number_input("Steps", min_value=0, max_value=30000, step=500, value=None)
+            sleep_hours = st.number_input("Sleep Hours", min_value=0.0, max_value=12.0, step=0.5, value=None)
+            energy = st.slider("Energy (1–10)", min_value=1, max_value=10, value=5)
+            soreness = st.slider("Soreness (1–10)", min_value=1, max_value=10, value=5)
+            stress = st.slider("Stress (1–10)", min_value=1, max_value=10, value=5)
+            deload = st.checkbox("Deload week", value=False)
+            notes = st.text_input("Notes", value="")
+
+            submitted = st.form_submit_button("Save Checkin")
+
+        if submitted:
+            row = {
+                "Date": today_str,
+                "Bodyweight": bodyweight if bodyweight is not None else "",
+                "Calories": calories if calories is not None else "",
+                "Protein": protein if protein is not None else "",
+                "Carbs": carbs if carbs is not None else "",
+                "Fat": fat if fat is not None else "",
+                "Steps": steps if steps is not None else "",
+                "SleepHours": sleep_hours if sleep_hours is not None else "",
+                "Energy": energy,
+                "Soreness": soreness,
+                "Stress": stress,
+                "Deload": "TRUE" if deload else "FALSE",
+                "Notes": notes,
+            }
+            try:
+                append_checkin_row(spreadsheet_id, row)
+                st.cache_data.clear()
+                st.success(f"Checkin logged for {today_str}")
+            except Exception as exc:
+                st.error(str(exc))
 
 
 def render_coach_page(
@@ -2058,6 +2180,8 @@ def render_coach_page(
     )
     progress = weekly_progress_tracker(df, checkins)
 
+    render_checkin_form(spreadsheet_id)
+    st.divider()
     render_weekly_review(df, checkins)
     st.divider()
     _render_todays_priority(priority)

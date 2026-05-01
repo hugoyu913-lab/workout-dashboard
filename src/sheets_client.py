@@ -14,7 +14,12 @@ from google.oauth2.service_account import Credentials
 
 DEFAULT_SPREADSHEET_ID = "1-45dvx4NOmyAOg8fDBL4_525NMXhCuEcSk_eaf9v9AI"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+_WRITE_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 CHECKINS_SHEET_NAME = "checkins"
+_CHECKIN_COLUMNS = [
+    "Date", "Bodyweight", "Calories", "Protein", "Carbs", "Fat",
+    "Steps", "SleepHours", "Energy", "Soreness", "Stress", "Deload", "Notes",
+]
 
 # Matches "m/d" or "m/d/yy" or "m/d/yyyy" anywhere in a string
 _DATE_RE = re.compile(r"(\d{1,2}/\d{1,2}(?:/\d{2,4})?)")
@@ -226,3 +231,37 @@ def load_checkins_worksheet(spreadsheet_id: str = DEFAULT_SPREADSHEET_ID) -> pd.
         ) from exc
 
     return pd.DataFrame(records)
+
+
+def append_checkin_row(spreadsheet_id: str, row: dict) -> None:
+    info = _service_account_info_from_streamlit_secrets() or _service_account_info_from_local_file()
+    if info is None:
+        raise GoogleSheetsError(
+            "Google credentials were not found. Add config/credentials.json locally or "
+            "configure [gcp_service_account] in Streamlit secrets."
+        )
+    creds = Credentials.from_service_account_info(info, scopes=_WRITE_SCOPES)
+    client = gspread.authorize(creds)
+    try:
+        spreadsheet = client.open_by_key(spreadsheet_id)
+    except gspread.exceptions.SpreadsheetNotFound as exc:
+        raise GoogleSheetsError(
+            "Spreadsheet was not found. Confirm the ID and share the sheet with "
+            "the service account email."
+        ) from exc
+    worksheet = next(
+        (sheet for sheet in spreadsheet.worksheets()
+         if sheet.title.strip().lower() == CHECKINS_SHEET_NAME),
+        None,
+    )
+    if worksheet is None:
+        raise GoogleSheetsError("Checkins worksheet not found.")
+
+    row_values = [row.get(col, "") for col in _CHECKIN_COLUMNS]
+    today_str = str(row.get("Date", ""))
+    col_a = worksheet.col_values(1)
+    for i, cell in enumerate(col_a):
+        if cell.strip() == today_str:
+            worksheet.update([[*row_values]], f"A{i + 1}")
+            return
+    worksheet.append_row(row_values, value_input_option="USER_ENTERED")
