@@ -70,9 +70,18 @@ html, body,
 
 * { font-family: 'IBM Plex Mono', monospace !important; }
 
+[data-testid="stExpanderToggleIcon"],
+[data-testid="stExpanderToggleIcon"] *,
+button[kind="expanderHeader"] svg,
+.stExpander summary svg,
+[data-baseweb="accordion"] svg {
+    font-family: inherit !important;
+}
+
 /* Restore Material Symbols font so Streamlit icons render correctly */
 .material-symbols-rounded,
-[class*="material-symbols-"] {
+[class*="material-symbols-"],
+[data-testid="stExpanderToggleIcon"] {
     font-family: 'Material Symbols Rounded' !important;
 }
 
