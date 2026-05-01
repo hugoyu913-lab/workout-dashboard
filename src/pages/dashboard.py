@@ -384,7 +384,7 @@ def render_mev_warnings(df: pd.DataFrame) -> None:
 
 
 def render_bodyweight_recovery(checkins: pd.DataFrame, workout_df: pd.DataFrame) -> None:
-    section_header("Bodyweight & Recovery")
+    section_header("Recovery & Trends")
 
     if checkins.empty:
         c1, c2 = st.columns(2)
