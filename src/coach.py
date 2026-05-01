@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from html import escape
 from pathlib import Path
+import re
 
 import pandas as pd
 import streamlit as st
@@ -104,16 +105,28 @@ def _prep_checkins(checkins: pd.DataFrame | None) -> pd.DataFrame:
         return pd.DataFrame()
     raw_dates = data["Date"].astype(str).str.strip()
     current_year = pd.Timestamp.now().year
-    bare_month_day = raw_dates.str.match(r"^\d{1,2}/\d{1,2}$", na=False)
-    normalized_dates = raw_dates.mask(bare_month_day, raw_dates + f"/{current_year}")
-    data["Date"] = pd.to_datetime(normalized_dates, format="mixed", errors="coerce")
-    missing = data["Date"].isna()
-    if missing.any():
-        data.loc[missing, "Date"] = pd.to_datetime(
-            raw_dates[missing] + f"/{current_year}",
-            format="mixed",
-            errors="coerce",
-        )
+    local_tz = datetime.now().astimezone().tzinfo
+
+    def parse_local_date(raw_value: str) -> pd.Timestamp:
+        raw_text = str(raw_value).strip()
+        parse_text = raw_text
+        if re.fullmatch(r"\d{1,2}/\d{1,2}", raw_text):
+            parse_text = f"{raw_text}/{current_year}"
+        parsed = pd.to_datetime(parse_text, format="mixed", errors="coerce")
+        if pd.isna(parsed):
+            parsed = pd.to_datetime(f"{raw_text}/{current_year}", format="mixed", errors="coerce")
+        if pd.isna(parsed):
+            return pd.NaT
+        timestamp = pd.Timestamp(parsed)
+        if timestamp.tzinfo is not None:
+            if local_tz is not None:
+                timestamp = timestamp.tz_convert(local_tz)
+            timestamp = timestamp.tz_localize(None)
+        else:
+            timestamp = timestamp.tz_localize(None)
+        return timestamp.normalize()
+
+    data["Date"] = raw_dates.apply(parse_local_date)
     data["Date"] = data["Date"].dt.normalize()
     data = data.dropna(subset=["Date"]).sort_values("Date")
     return data
