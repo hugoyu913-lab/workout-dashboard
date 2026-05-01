@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta
 from html import escape
 from pathlib import Path
 import re
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
@@ -28,6 +29,7 @@ from src.recommendations import EXERCISE_RECOMMENDATIONS_PATH
 from src.fatigue import fatigue_risk_detector
 from src.sheets_client import append_checkin_row
 
+LOCAL_TIMEZONE = ZoneInfo("America/Phoenix")
 MUSCLE_GROUPS = ["chest", "back", "shoulders", "arms", "legs", "core"]
 SPLIT_MUSCLES = [
     [muscle.lower() for muscle in split]
@@ -45,7 +47,7 @@ _ANCHOR_GROUP_TO_MUSCLE: dict[str, str] = {
 
 
 def _today() -> date:
-    return date.today()
+    return datetime.now(LOCAL_TIMEZONE).date()
 
 
 def _week_bounds(ref: date | None = None) -> tuple[date, date]:
@@ -87,7 +89,7 @@ def _prep_workouts(df: pd.DataFrame | None) -> pd.DataFrame:
             work[col] = pd.NA
     raw_dates = work["Date"].astype(str).str.strip()
     current_year = pd.Timestamp.now().year
-    local_tz = datetime.now().astimezone().tzinfo
+    local_tz = LOCAL_TIMEZONE
 
     def parse_local_date(raw_value: str) -> pd.Timestamp:
         raw_text = str(raw_value).strip()
@@ -129,7 +131,7 @@ def _prep_checkins(checkins: pd.DataFrame | None) -> pd.DataFrame:
         return pd.DataFrame()
     raw_dates = data["Date"].astype(str).str.strip()
     current_year = pd.Timestamp.now().year
-    local_tz = datetime.now().astimezone().tzinfo
+    local_tz = LOCAL_TIMEZONE
 
     def parse_local_date(raw_value: str) -> pd.Timestamp:
         raw_text = str(raw_value).strip()
