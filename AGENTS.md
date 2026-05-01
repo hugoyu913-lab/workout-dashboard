@@ -30,6 +30,16 @@ Workflow:
    python -m py_compile app.py src/coach.py src/sheets_client.py src/pages/dashboard.py
 6. Commit only intended files.
 
+## No-API Review Loop
+
+For medium or large code changes:
+- Save Claude review prompt to ai_loop/review_prompt.txt.
+- Wait for user to paste Claude feedback into ai_loop/claude_feedback.txt.
+- Read claude_feedback.txt before fixing.
+- Apply only Must Fix items.
+- Do not use API calls or paid credits.
+- Do not commit until user approves.
+
 Do not commit:
 - .claude/settings.local.json
 - caveman/

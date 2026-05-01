@@ -1,0 +1,1 @@
+Reusable scratch file for Claude review prompts. Overwrite during each review loop.
